@@ -355,6 +355,18 @@ static struct cpu_spec cpu_specs[] = {
 		.num_pmcs		= 6,
 		.platform		= "pa6t",
 	},
+	{	/* Xenon */
+		.pvr_mask		= 0xffff0000,
+		.pvr_value	= 0x00710000,
+		.cpu_name		= "Xenon",
+		.cpu_features		= CPU_FTRS_XENON,
+		.cpu_user_features	= COMMON_USER_PPC64 |
+			PPC_FEATURE_HAS_ALTIVEC_COMP |
+			PPC_FEATURE_SMT,
+		.icache_bsize		= 128,
+		.dcache_bsize		= 128,
+		.platform		= "xenon",
+	},
 	{	/* default match */
 		.pvr_mask		= 0x00000000,
 		.pvr_value		= 0x00000000,

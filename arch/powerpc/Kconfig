@@ -463,6 +463,13 @@ config PPC_PMAC64
 	select PPC_970_NAP
 	default y
 
+config PPC_XENON
+	bool "Xenon"
+	depends on PPC_MULTIPLATFORM  && PPC64
+	select PPC_RTAS
+	select PPC_NATIVE
+	default y
+
 config PPC_PREP
 	bool "PowerPC Reference Platform (PReP) based machines"
 	depends on PPC_MULTIPLATFORM && PPC32 && BROKEN
