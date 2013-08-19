@@ -1309,3 +1309,8 @@ unsigned long randomize_et_dyn(unsigned long base)
 
 	return ret;
 }
+
+void arch_trigger_all_cpu_backtrace(void)
+{
+	panic("arch_trigger_all_cpu_backtrace() not implemented yet\n");
+}
