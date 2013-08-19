@@ -307,6 +307,15 @@ extern unsigned int __do_IRQ(unsigned int irq);
  */
 static inline void generic_handle_irq_desc(unsigned int irq, struct irq_desc *desc)
 {
+	if (!desc) {
+		printk("generic_handle_irq_desc(%u,%p) ...\n", irq, desc);
+		return;
+	}
+#if 0
+	if (irq != 16 && irq != 76)
+		printk("generic_handle_irq_desc(%u,%p) -> %p\n",
+			irq, desc, desc ? desc->handle_irq : 0);
+#endif
 #ifdef CONFIG_GENERIC_HARDIRQS_NO__DO_IRQ
 	desc->handle_irq(irq, desc);
 #else

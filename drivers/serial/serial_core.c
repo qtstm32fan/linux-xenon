@@ -2337,10 +2337,12 @@ int uart_register_driver(struct uart_driver *drv)
 	 * we have a large number of ports to handle.
 	 */
 	drv->state = kzalloc(sizeof(struct uart_state) * drv->nr, GFP_KERNEL);
+	printk(KERN_INFO "kzalloc() = %p\n", drv->state);
 	if (!drv->state)
 		goto out;
 
 	normal = alloc_tty_driver(drv->nr);
+	printk(KERN_INFO "alloc_tty_driver(%d) = %p\n", drv->nr, normal);
 	if (!normal)
 		goto out_kfree;
 
@@ -2375,6 +2377,7 @@ int uart_register_driver(struct uart_driver *drv)
 	}
 
 	retval = tty_register_driver(normal);
+	printk(KERN_INFO "tty_register_driver(%p) = %d\n", normal, retval);
 	if (retval >= 0)
 		return retval;
 
@@ -2382,6 +2385,7 @@ int uart_register_driver(struct uart_driver *drv)
 out_kfree:
 	kfree(drv->state);
 out:
+	printk(KERN_INFO "out nomem\n");
 	return -ENOMEM;
 }
 

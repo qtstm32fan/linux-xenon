@@ -146,7 +146,7 @@ int __devinit pcibios_map_io_space(struct pci_bus *bus)
 	if (bus->self) {
 		pr_debug("IO mapping for PCI-PCI bridge %s\n",
 			 pci_name(bus->self));
-		pr_debug("  virt=0x%016llx...0x%016llx\n",
+		pr_debug("  virt=0x%016lx...0x%016lx\n",
 			 bus->resource[0]->start + _IO_BASE,
 			 bus->resource[0]->end + _IO_BASE);
 		return 0;

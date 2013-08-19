@@ -253,6 +253,8 @@ obj-$(CONFIG_DNET) += dnet.o
 obj-$(CONFIG_MACB) += macb.o
 obj-$(CONFIG_S6GMAC) += s6gmac.o
 
+obj-$(CONFIG_XENON_ENET) += xenon_net.o
+
 obj-$(CONFIG_ARM) += arm/
 obj-$(CONFIG_DEV_APPLETALK) += appletalk/
 obj-$(CONFIG_TR) += tokenring/
@@ -280,6 +282,7 @@ obj-$(CONFIG_NETCONSOLE) += netconsole.o
 obj-$(CONFIG_FS_ENET) += fs_enet/
 
 obj-$(CONFIG_NETXEN_NIC) += netxen/
+
 obj-$(CONFIG_NIU) += niu.o
 obj-$(CONFIG_VIRTIO_NET) += virtio_net.o
 obj-$(CONFIG_SFC) += sfc/

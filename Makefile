@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 33
-EXTRAVERSION =
+EXTRAVERSION = linux-2.6.33-xbox0.10
 NAME = Man-Eating Seals of Antiquity
 
 # *DOCUMENTATION*
