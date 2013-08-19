@@ -1634,6 +1634,9 @@ config 8139CP
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called 8139cp.  This is recommended.
+config XENON_ENET
+	tristate "Xenon Fast Ethernet Adapter support"
+	depends on NET_PCI && PCI
 
 config 8139TOO
 	tristate "RealTek RTL-8129/8130/8139 PCI Fast Ethernet Adapter support"

@@ -356,6 +356,26 @@ config STALDRV
 	  in this case.  If you have never heard about all this, it's safe to
 	  say N.
 
+config XENON_SMC
+	tristate "Xenon System Management Controller (SMC)"
+	depends on PPC_XENON
+	help
+	  Character interface to the System Management controller in the
+	  Xbox 360. Allows to send arbitrary SMC commands and receive
+	  SMC replies.
+
+config XENON_ANA
+	tristate "Xenon (H)ana Character Device"
+	depends on PPC_XENON
+	help
+	  Character interface to the (H)ana chip on the Xbox 360.
+
+config XENON_PROBE
+	tristate "Xenon Memory Probe Device"
+	depends on PPC_XENON && EXPERIMENTAL
+	help
+	  Character interface to do memory probing on the Xbox 360.
+
 config STALLION
 	tristate "Stallion EasyIO or EC8/32 support"
 	depends on STALDRV && (ISA || EISA || PCI)
@@ -1143,6 +1163,24 @@ config RAMOOPS
 	help
 	  This enables panic and oops messages to be logged to a circular
 	  buffer in RAM where it can be read back at some later point.
+
+config SERIAL_XENON
+	tristate "Xenon XBOX 360 serial port support"
+	select SERIAL_CORE
+	help
+	  If you have an XBOX 360, you can enable its onboard
+	  serial port by enabling this options.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called xenon_uart.
+
+config SERIAL_XENON_CONSOLE
+	bool "Console on XBOX 360 serial port"
+	depends on SERIAL_XENON=y
+	select SERIAL_CORE_CONSOLE
+	help
+	  If you have enabled the serial port on the XBOX 360
+	  you can make it the console by answering Y to this option.
 
 endmenu
 

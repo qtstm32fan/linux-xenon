@@ -261,7 +261,7 @@ void crash_kexec_secondary(struct pt_regs *regs)
  */
 int crash_shutdown_register(crash_shutdown_t handler)
 {
-	unsigned int i, rc;
+	unsigned int i, rc = 0;
 
 	spin_lock(&crash_handlers_lock);
 	for (i = 0 ; i < CRASH_HANDLER_MAX; i++)
