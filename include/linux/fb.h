@@ -913,6 +913,18 @@ static inline void __fb_pad_aligned_buffer(u8 *dst, u32 d_pitch,
 	}
 }
 
+static inline int *xenon_convert(struct fb_info *p, int *addr)
+{
+	int index = ((char*)addr) - ((char*)p->screen_base);
+	int y = index / (p->fix.line_length);
+	int x = index % (p->fix.line_length)/4;
+	unsigned int base = ((((y & ~31)*p->var.xres) + (x & ~31)*32 ) +
+	 (((x&3) + ((y&1)<<2) + ((x&28)<<1) + ((y&30)<<5)) ^ ((y&8)<<2))) * 4;
+
+	return (int*)(((char*)p->screen_base)+base);
+}
+
+
 /* drivers/video/fbsysfs.c */
 extern struct fb_info *framebuffer_alloc(size_t size, struct device *dev);
 extern void framebuffer_release(struct fb_info *info);

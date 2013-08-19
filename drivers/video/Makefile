@@ -103,6 +103,7 @@ obj-$(CONFIG_FB_SM501)            += sm501fb.o
 # Platform or fallback drivers go here
 obj-$(CONFIG_FB_VESA)             += vesafb.o
 obj-$(CONFIG_FB_IMAC)             += imacfb.o
+obj-$(CONFIG_FB_XENON)            += xenonfb.o
 obj-$(CONFIG_FB_VGA16)            += vga16fb.o vgastate.o
 obj-$(CONFIG_FB_OF)               += offb.o
 

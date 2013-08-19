@@ -1464,7 +1464,7 @@ int ata_dev_read_id(struct ata_device *dev, unsigned int *p_class,
 	/* Device presence detection is unreliable on some
 	 * controllers.  Always poll IDENTIFY if available.
 	 */
-	tf.flags |= ATA_TFLAG_POLLING;
+//	tf.flags |= ATA_TFLAG_POLLING;
 
 	err_mask = ata_exec_internal(dev, &tf, NULL, DMA_FROM_DEVICE,
 				     id, sizeof(id[0]) * ATA_ID_WORDS);

@@ -149,6 +149,10 @@ $(obj)/zImage.miboot: vmlinux $(wrapperbits)
 $(obj)/zImage.initrd.miboot: vmlinux $(wrapperbits)
 	$(call cmd,wrap_initrd,miboot)
 
+$(obj)/zImage.xenon: vmlinux $(wrapperbits)
+	$(call cmd,wrap,chrp)
+	${CROSS}objcopy -O elf32-powerpc vmlinux vmlinux.xenon
+
 $(obj)/zImage.ps3: vmlinux
 	$(STRIP) -s -R .comment $< -o $@
 
@@ -161,6 +165,7 @@ $(obj)/uImage: vmlinux $(wrapperbits)
 image-$(CONFIG_PPC_PSERIES)		+= zImage.pseries
 image-$(CONFIG_PPC_MAPLE)		+= zImage.pseries
 image-$(CONFIG_PPC_IBM_CELL_BLADE)	+= zImage.pseries
+image-$(CONFIG_PPC_XENON)		+= zImage.xenon
 image-$(CONFIG_PPC_PS3)			+= zImage.ps3
 image-$(CONFIG_PPC_CELLEB)		+= zImage.pseries
 image-$(CONFIG_PPC_CHRP)		+= zImage.chrp

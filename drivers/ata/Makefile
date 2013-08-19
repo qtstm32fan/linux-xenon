@@ -11,6 +11,7 @@ obj-$(CONFIG_SATA_SIL24)	+= sata_sil24.o
 obj-$(CONFIG_SATA_VIA)		+= sata_via.o
 obj-$(CONFIG_SATA_VITESSE)	+= sata_vsc.o
 obj-$(CONFIG_SATA_SIS)		+= sata_sis.o
+obj-$(CONFIG_SATA_XENON)	+= sata_xenon.o
 obj-$(CONFIG_SATA_SX4)		+= sata_sx4.o
 obj-$(CONFIG_SATA_NV)		+= sata_nv.o
 obj-$(CONFIG_SATA_ULI)		+= sata_uli.o

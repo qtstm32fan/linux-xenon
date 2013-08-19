@@ -25,6 +25,18 @@ int (*udbg_getc_poll)(void);
  * Early debugging facilities. You can enable _one_ of these via .config,
  * if you do so your kernel _will not boot_ on anything else. Be careful.
  */
+
+extern u8 real_readb(volatile u8 __iomem  *addr);
+extern void real_writeb(u8 data, volatile u8 __iomem *addr);
+
+void udbg_xenon_real_putc(char c)
+{
+	if (c == '\n')
+		udbg_xenon_real_putc('\r');
+	while (!(real_readb((void*)0x80000200ea001018ULL)&0x02));
+	real_writeb(c, (void*)0x80000200ea001014ULL);
+}
+
 void __init udbg_early_init(void)
 {
 #if defined(CONFIG_PPC_EARLY_DEBUG_LPAR)
@@ -52,6 +64,7 @@ void __init udbg_early_init(void)
 #elif defined(CONFIG_BOOTX_TEXT)
 	udbg_init_btext();
 #endif
+	udbg_putc = udbg_xenon_real_putc;
 }
 
 /* udbg library, used by xmon et al */
@@ -156,6 +169,7 @@ void __init disable_early_printk(void)
 		printk(KERN_INFO "early console immortal !\n");
 		return;
 	}
+	return;
 	unregister_console(&udbg_console);
 	early_console_initialized = 0;
 }
