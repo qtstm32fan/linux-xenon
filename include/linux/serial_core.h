@@ -196,6 +196,9 @@
 /* High Speed UART for Medfield */
 #define PORT_MFD	95
 
+/* Xenon XBOX 360 Southbridge */
+#define PORT_XENON	91
+
 #ifdef __KERNEL__
 
 #include <linux/compiler.h>
@@ -238,7 +241,7 @@ struct uart_ops {
 	/*
 	 * Return a string describing the type of the port
 	 */
-	const char *(*type)(struct uart_port *);
+	const char *	(*type)(struct uart_port *);
 
 	/*
 	 * Release IO and memory resources used by the port.
@@ -255,7 +258,7 @@ struct uart_ops {
 	int		(*verify_port)(struct uart_port *, struct serial_struct *);
 	int		(*ioctl)(struct uart_port *, unsigned int, unsigned long);
 #ifdef CONFIG_CONSOLE_POLL
-	void	(*poll_put_char)(struct uart_port *, unsigned char);
+	void		(*poll_put_char)(struct uart_port *, unsigned char);
 	int		(*poll_get_char)(struct uart_port *);
 #endif
 };

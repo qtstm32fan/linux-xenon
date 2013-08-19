@@ -1309,3 +1309,9 @@ int arch_sd_sibling_asym_packing(void)
 	return 0;
 }
 #endif
+
+void arch_trigger_all_cpu_backtrace(void)
+{
+	panic("arch_trigger_all_cpu_backtrace() not implemented yet\n");
+}
+

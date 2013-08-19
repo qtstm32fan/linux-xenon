@@ -480,6 +480,17 @@ static struct cpu_spec __initdata cpu_specs[] = {
 		.machine_check		= machine_check_generic,
 		.platform		= "ppc-cell-be",
 	},
+	{	/* Xenon */
+		.pvr_mask		= 0xffff0000,
+		.pvr_value		= 0x00710000,
+		.cpu_name		= "Xenon",
+		.cpu_features		= CPU_FTRS_XENON,
+		.cpu_user_features	= COMMON_USER_PPC64 |
+			PPC_FEATURE_SMT,
+		.icache_bsize		= 128,
+		.dcache_bsize		= 128,
+		.platform		= "xenon",
+	},
 	{	/* PA Semi PA6T */
 		.pvr_mask		= 0x7fff0000,
 		.pvr_value		= 0x00900000,

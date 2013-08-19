@@ -7,6 +7,7 @@
 
 obj-y				+= gpio/
 obj-$(CONFIG_PCI)		+= pci/
+obj-$(CONFIG_PPC_XENON)		+= xenon/
 obj-$(CONFIG_PARISC)		+= parisc/
 obj-$(CONFIG_RAPIDIO)		+= rapidio/
 obj-y				+= video/

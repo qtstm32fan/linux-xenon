@@ -567,8 +567,11 @@ _GLOBAL(pmac_secondary_start)
 	.section ".text";
 	.align 2 ;
 
+/*
 	.globl	__secondary_start
 __secondary_start:
+*/
+_INIT_GLOBAL(__secondary_start)
 	/* Set thread priority to MEDIUM */
 	HMT_MEDIUM
 
@@ -617,7 +620,7 @@ END_FW_FTR_SECTION_IFCLR(FW_FEATURE_ISERIES)
  * zero the stack back-chain pointer and get the TOC virtual address
  * before going into C code.
  */
-_GLOBAL(start_secondary_prolog)
+_INIT_GLOBAL(start_secondary_prolog)
 	ld	r2,PACATOC(r13)
 	li	r3,0
 	std	r3,0(r1)		/* Zero the stack frame pointer	*/
