@@ -246,7 +246,7 @@ _GLOBAL(__bswapdi2)
 	or	r3,r7,r9
 	blr
 
-#if defined(CONFIG_PPC_PMAC) || defined(CONFIG_PPC_MAPLE)
+#if defined(CONFIG_PPC_PMAC) || defined(CONFIG_PPC_MAPLE) || defined(CONFIG_PPC_XENON)
 /*
  * Do an IO access in real mode
  */

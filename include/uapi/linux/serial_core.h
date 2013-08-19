@@ -220,6 +220,9 @@
 /* Energy Micro efm32 SoC */
 #define PORT_EFMUART   100
 
+/* Xenon XBOX 360 Southbridge */
+#define PORT_XENON     91
+
 /* ARC (Synopsys) on-chip UART */
 #define PORT_ARC       101
 
