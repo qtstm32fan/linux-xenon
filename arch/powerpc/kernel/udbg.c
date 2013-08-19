@@ -56,6 +56,8 @@ void __init udbg_early_init(void)
 	udbg_init_44x_as1();
 #elif defined(CONFIG_PPC_EARLY_DEBUG_CPM)
 	udbg_init_cpm();
+#elif defined(CONFIG_PPC_EARLY_DEBUG_XENON)
+//	udbg_init_xenon();
 #endif
 }
 

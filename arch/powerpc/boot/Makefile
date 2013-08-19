@@ -138,6 +138,7 @@ image-$(CONFIG_PPC_PSERIES)		+= zImage.pseries
 image-$(CONFIG_PPC_MAPLE)		+= zImage.pseries
 image-$(CONFIG_PPC_IBM_CELL_BLADE)	+= zImage.pseries
 image-$(CONFIG_PPC_PS3)			+= zImage.ps3
+image-$(CONFIG_PPC_XENON)		+= zImage.xenon
 image-$(CONFIG_PPC_CELLEB)		+= zImage.pseries
 image-$(CONFIG_PPC_CHRP)		+= zImage.chrp
 image-$(CONFIG_PPC_EFIKA)		+= zImage.chrp
@@ -198,6 +199,9 @@ $(obj)/zImage.%: vmlinux $(wrapperbits) $(dts)
 # prefix
 $(obj)/vmlinux.strip: vmlinux
 	$(STRIP) -s -R .comment $< -o $@
+
+$(obj)/zImage.xenon: vmlinux
+	$(OBJCOPY) -O elf32-powerpc $< $@
 
 $(obj)/zImage.iseries: vmlinux
 	$(STRIP) -s -R .comment $< -o $@

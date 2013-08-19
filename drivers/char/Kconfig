@@ -351,6 +351,16 @@ config STALDRV
 	  this case.  If you have never heard about all this, it's safe to
 	  say N.
 
+config XENON_SMC
+	bool "Xenon System Management Controller (SMC)"
+	depends on PPC_XENON
+	help
+	  The System Management controller in the Xbox 360.
+	  It requires a userspace daemon available at
+	  http://...
+	  and controls power, the frontpanel leds, infrared remote,
+	  tilt switch, AVIP detection, RTC and DVD tray.
+
 config STALLION
 	tristate "Stallion EasyIO or EC8/32 support"
 	depends on STALDRV && BROKEN_ON_SMP && (ISA || EISA || PCI)

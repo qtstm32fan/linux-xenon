@@ -11,6 +11,7 @@ obj-$(CONFIG_SATA_SIL24)	+= sata_sil24.o
 obj-$(CONFIG_SATA_VIA)		+= sata_via.o
 obj-$(CONFIG_SATA_VITESSE)	+= sata_vsc.o
 obj-$(CONFIG_SATA_SIS)		+= sata_sis.o
+obj-$(CONFIG_SATA_XENON)	+= sata_xenon.o
 obj-$(CONFIG_SATA_SX4)		+= sata_sx4.o
 obj-$(CONFIG_SATA_NV)		+= sata_nv.o
 obj-$(CONFIG_SATA_ULI)		+= sata_uli.o
@@ -62,6 +63,7 @@ obj-$(CONFIG_PATA_VIA)		+= pata_via.o
 obj-$(CONFIG_PATA_WINBOND)	+= pata_sl82c105.o
 obj-$(CONFIG_PATA_WINBOND_VLB)	+= pata_winbond.o
 obj-$(CONFIG_PATA_SIS)		+= pata_sis.o
+obj-$(CONFIG_SATA_XENON)	+= sata_xenon.o
 obj-$(CONFIG_PATA_TRIFLEX)	+= pata_triflex.o
 obj-$(CONFIG_PATA_IXP4XX_CF)	+= pata_ixp4xx_cf.o
 obj-$(CONFIG_PATA_SCC)		+= pata_scc.o
@@ -78,3 +80,4 @@ obj-$(CONFIG_PATA_LEGACY)	+= pata_legacy.o
 libata-objs	:= libata-core.o libata-scsi.o libata-sff.o libata-eh.o \
 		   libata-pmp.o
 libata-$(CONFIG_ATA_ACPI)	+= libata-acpi.o
+
