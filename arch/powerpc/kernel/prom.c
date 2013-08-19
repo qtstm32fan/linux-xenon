@@ -14,6 +14,7 @@
  */
 
 #undef DEBUG
+#define DEBUG
 
 #include <stdarg.h>
 #include <linux/kernel.h>

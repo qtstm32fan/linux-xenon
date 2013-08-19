@@ -1596,4 +1596,23 @@ config SERIAL_PCH_UART
 	  This driver is for PCH(Platform controller Hub) UART of Intel EG20T
 	  which is an IOH(Input/Output Hub) for x86 embedded processor.
 	  Enabling PCH_DMA, this PCH UART works as DMA mode.
+
+config SERIAL_XENON
+	tristate "Xenon XBOX 360 serial port support"
+	select SERIAL_CORE
+	help
+	  If you have an XBOX 360, you can enable its onboard
+	  serial port by enabling this options.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called xenon_uart.
+
+config SERIAL_XENON_CONSOLE
+	bool "Console on XBOX 360 serial port"
+	depends on SERIAL_XENON=y
+	select SERIAL_CORE_CONSOLE
+	help
+	  If you have enabled the serial port on the XBOX 360
+	  you can make it the console by answering Y to this option.
+
 endmenu

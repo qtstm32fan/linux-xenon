@@ -27,6 +27,15 @@ config MMU
 	bool
 	default y
 
+config PPC_XENON
+	bool "Xenon"
+	depends on PPC64
+	select PPC_NATIVE
+	default y
+	help
+	  This option enables support for the Xbox 360 game console
+	  without a hypervisor.
+
 config GENERIC_CMOS_UPDATE
 	def_bool y
 
@@ -982,3 +991,4 @@ config PPC_LIB_RHEAP
 	bool
 
 source "arch/powerpc/kvm/Kconfig"
+
