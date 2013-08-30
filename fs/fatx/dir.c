@@ -1,5 +1,5 @@
 /*
- *  linux/fs/fat/dir.c
+ *  linux/fs/fatx/dir.c
  *
  *  directory handling functions for fat-based filesystems
  *
@@ -24,35 +24,35 @@
 
 /*
  * Maximum buffer size of short name.
- * [(MSDOS_NAME + '.') * max one char + nul]
- * For msdos style, ['.' (hidden) + MSDOS_NAME + '.' + nul]
+ * [(FATX_NAME + '.') * max one char + nul]
+ * For msdos style, ['.' (hidden) + FATX_NAME + '.' + nul]
  */
-#define FAT_MAX_SHORT_SIZE	((MSDOS_NAME + 1) * NLS_MAX_CHARSET_SIZE + 1)
+#define FATX_MAX_SHORT_SIZE	((FATX_NAME + 1) * NLS_MAX_CHARSET_SIZE + 1)
 /*
  * Maximum buffer size of unicode chars from slots.
  * [(max longname slots * 13 (size in a slot) + nul) * sizeof(wchar_t)]
  */
-#define FAT_MAX_UNI_CHARS	((MSDOS_SLOTS - 1) * 13 + 1)
-#define FAT_MAX_UNI_SIZE	(FAT_MAX_UNI_CHARS * sizeof(wchar_t))
+#define FATX_MAX_UNI_CHARS	((FATX_SLOTS - 1) * 13 + 1)
+#define FATX_MAX_UNI_SIZE	(FATX_MAX_UNI_CHARS * sizeof(wchar_t))
 
-static inline unsigned char fat_tolower(unsigned char c)
+static inline unsigned char fatx_tolower(unsigned char c)
 {
 	return ((c >= 'A') && (c <= 'Z')) ? c+32 : c;
 }
 
-static inline loff_t fat_make_i_pos(struct super_block *sb,
+static inline loff_t fatx_make_i_pos(struct super_block *sb,
 				    struct buffer_head *bh,
-				    struct msdos_dir_entry *de)
+				    struct fatx_dir_entry *de)
 {
-	return ((loff_t)bh->b_blocknr << MSDOS_SB(sb)->dir_per_block_bits)
-		| (de - (struct msdos_dir_entry *)bh->b_data);
+	return ((loff_t)bh->b_blocknr << FATX_SB(sb)->dir_per_block_bits)
+		| (de - (struct fatx_dir_entry *)bh->b_data);
 }
 
-static inline void fat_dir_readahead(struct inode *dir, sector_t iblock,
+static inline void fatx_dir_readahead(struct inode *dir, sector_t iblock,
 				     sector_t phys)
 {
 	struct super_block *sb = dir->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bh;
 	int sec;
 
@@ -60,7 +60,7 @@ static inline void fat_dir_readahead(struct inode *dir, sector_t iblock,
 	if ((iblock & (sbi->sec_per_clus - 1)) || sbi->sec_per_clus == 1)
 		return;
 	/* root dir of FAT12/FAT16 */
-	if ((sbi->fat_bits != 32) && (dir->i_ino == MSDOS_ROOT_INO))
+	if ((sbi->fatx_bits != 32) && (dir->i_ino == FATX_ROOT_INO))
 		return;
 
 	bh = sb_find_get_block(sb, phys);
@@ -81,8 +81,8 @@ static inline void fat_dir_readahead(struct inode *dir, sector_t iblock,
    AV. Additionally, when we return -1 (i.e. reached the end of directory)
    AV. we make bh NULL.
  */
-static int fat__get_entry(struct inode *dir, loff_t *pos,
-			  struct buffer_head **bh, struct msdos_dir_entry **de)
+static int fatx__get_entry(struct inode *dir, loff_t *pos,
+			  struct buffer_head **bh, struct fatx_dir_entry **de)
 {
 	struct super_block *sb = dir->i_sb;
 	sector_t phys, iblock;
@@ -95,15 +95,15 @@ next:
 
 	*bh = NULL;
 	iblock = *pos >> sb->s_blocksize_bits;
-	err = fat_bmap(dir, iblock, &phys, &mapped_blocks, 0);
+	err = fatx_bmap(dir, iblock, &phys, &mapped_blocks, 0);
 	if (err || !phys)
 		return -1;	/* beyond EOF or error */
 
-	fat_dir_readahead(dir, iblock, phys);
+	fatx_dir_readahead(dir, iblock, phys);
 
 	*bh = sb_bread(sb, phys);
 	if (*bh == NULL) {
-		fat_msg_ratelimit(sb, KERN_ERR,
+		fatx_msg_ratelimit(sb, KERN_ERR,
 			"Directory bread(block %llu) failed", (llu)phys);
 		/* skip this block */
 		*pos = (iblock + 1) << sb->s_blocksize_bits;
@@ -111,25 +111,25 @@ next:
 	}
 
 	offset = *pos & (sb->s_blocksize - 1);
-	*pos += sizeof(struct msdos_dir_entry);
-	*de = (struct msdos_dir_entry *)((*bh)->b_data + offset);
+	*pos += sizeof(struct fatx_dir_entry);
+	*de = (struct fatx_dir_entry *)((*bh)->b_data + offset);
 
 	return 0;
 }
 
-static inline int fat_get_entry(struct inode *dir, loff_t *pos,
+static inline int fatx_get_entry(struct inode *dir, loff_t *pos,
 				struct buffer_head **bh,
-				struct msdos_dir_entry **de)
+				struct fatx_dir_entry **de)
 {
 	/* Fast stuff first */
 	if (*bh && *de &&
-	   (*de - (struct msdos_dir_entry *)(*bh)->b_data) <
-				MSDOS_SB(dir->i_sb)->dir_per_block - 1) {
-		*pos += sizeof(struct msdos_dir_entry);
+	   (*de - (struct fatx_dir_entry *)(*bh)->b_data) <
+				FATX_SB(dir->i_sb)->dir_per_block - 1) {
+		*pos += sizeof(struct fatx_dir_entry);
 		(*de)++;
 		return 0;
 	}
-	return fat__get_entry(dir, pos, bh, de);
+	return fatx__get_entry(dir, pos, bh, de);
 }
 
 /*
@@ -145,7 +145,7 @@ static inline int fat_get_entry(struct inode *dir, loff_t *pos,
 static int uni16_to_x8(struct super_block *sb, unsigned char *ascii,
 		       const wchar_t *uni, int len, struct nls_table *nls)
 {
-	int uni_xlate = MSDOS_SB(sb)->options.unicode_xlate;
+	int uni_xlate = FATX_SB(sb)->options.unicode_xlate;
 	const wchar_t *ip;
 	wchar_t ec;
 	unsigned char *op;
@@ -174,7 +174,7 @@ static int uni16_to_x8(struct super_block *sb, unsigned char *ascii,
 	}
 
 	if (unlikely(*ip)) {
-		fat_msg(sb, KERN_WARNING,
+		fatx_msg(sb, KERN_WARNING,
 			"filename was truncated while converting.");
 	}
 
@@ -182,19 +182,19 @@ static int uni16_to_x8(struct super_block *sb, unsigned char *ascii,
 	return op - ascii;
 }
 
-static inline int fat_uni_to_x8(struct super_block *sb, const wchar_t *uni,
+static inline int fatx_uni_to_x8(struct super_block *sb, const wchar_t *uni,
 				unsigned char *buf, int size)
 {
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	if (sbi->options.utf8)
-		return utf16s_to_utf8s(uni, FAT_MAX_UNI_CHARS,
+		return utf16s_to_utf8s(uni, FATX_MAX_UNI_CHARS,
 				UTF16_HOST_ENDIAN, buf, size);
 	else
 		return uni16_to_x8(sb, buf, uni, size, sbi->nls_io);
 }
 
 static inline int
-fat_short2uni(struct nls_table *t, unsigned char *c, int clen, wchar_t *uni)
+fatx_short2uni(struct nls_table *t, unsigned char *c, int clen, wchar_t *uni)
 {
 	int charlen;
 
@@ -207,7 +207,7 @@ fat_short2uni(struct nls_table *t, unsigned char *c, int clen, wchar_t *uni)
 }
 
 static inline int
-fat_short2lower_uni(struct nls_table *t, unsigned char *c,
+fatx_short2lower_uni(struct nls_table *t, unsigned char *c,
 		    int clen, wchar_t *uni)
 {
 	int charlen;
@@ -235,27 +235,27 @@ fat_short2lower_uni(struct nls_table *t, unsigned char *c,
 }
 
 static inline int
-fat_shortname2uni(struct nls_table *nls, unsigned char *buf, int buf_size,
+fatx_shortname2uni(struct nls_table *nls, unsigned char *buf, int buf_size,
 		  wchar_t *uni_buf, unsigned short opt, int lower)
 {
 	int len = 0;
 
 	if (opt & VFAT_SFN_DISPLAY_LOWER)
-		len =  fat_short2lower_uni(nls, buf, buf_size, uni_buf);
+		len =  fatx_short2lower_uni(nls, buf, buf_size, uni_buf);
 	else if (opt & VFAT_SFN_DISPLAY_WIN95)
-		len = fat_short2uni(nls, buf, buf_size, uni_buf);
+		len = fatx_short2uni(nls, buf, buf_size, uni_buf);
 	else if (opt & VFAT_SFN_DISPLAY_WINNT) {
 		if (lower)
-			len = fat_short2lower_uni(nls, buf, buf_size, uni_buf);
+			len = fatx_short2lower_uni(nls, buf, buf_size, uni_buf);
 		else
-			len = fat_short2uni(nls, buf, buf_size, uni_buf);
+			len = fatx_short2uni(nls, buf, buf_size, uni_buf);
 	} else
-		len = fat_short2uni(nls, buf, buf_size, uni_buf);
+		len = fatx_short2uni(nls, buf, buf_size, uni_buf);
 
 	return len;
 }
 
-static inline int fat_name_match(struct msdos_sb_info *sbi,
+static inline int fatx_name_match(struct fatx_sb_info *sbi,
 				 const unsigned char *a, int a_len,
 				 const unsigned char *b, int b_len)
 {
@@ -271,7 +271,7 @@ static inline int fat_name_match(struct msdos_sb_info *sbi,
 enum { PARSE_INVALID = 1, PARSE_NOT_LONGNAME, PARSE_EOF, };
 
 /**
- * fat_parse_long - Parse extended directory entry.
+ * fatx_parse_long - Parse extended directory entry.
  *
  * This function returns zero on success, negative value on error, or one of
  * the following:
@@ -280,11 +280,11 @@ enum { PARSE_INVALID = 1, PARSE_NOT_LONGNAME, PARSE_EOF, };
  * %PARSE_NOT_LONGNAME - Directory entry does not contain longname.
  * %PARSE_EOF - Directory has no more entries.
  */
-static int fat_parse_long(struct inode *dir, loff_t *pos,
-			  struct buffer_head **bh, struct msdos_dir_entry **de,
+static int fatx_parse_long(struct inode *dir, loff_t *pos,
+			  struct buffer_head **bh, struct fatx_dir_entry **de,
 			  wchar_t **unicode, unsigned char *nr_slots)
 {
-	struct msdos_dir_slot *ds;
+	struct fatx_dir_slot *ds;
 	unsigned char id, slot, slots, alias_checksum;
 
 	if (!*unicode) {
@@ -296,7 +296,7 @@ static int fat_parse_long(struct inode *dir, loff_t *pos,
 	}
 parse_long:
 	slots = 0;
-	ds = (struct msdos_dir_slot *)*de;
+	ds = (struct fatx_dir_slot *)*de;
 	id = ds->id;
 	if (!(id & 0x40))
 		return PARSE_INVALID;
@@ -312,17 +312,17 @@ parse_long:
 
 		slot--;
 		offset = slot * 13;
-		fat16_towchar(*unicode + offset, ds->name0_4, 5);
-		fat16_towchar(*unicode + offset + 5, ds->name5_10, 6);
-		fat16_towchar(*unicode + offset + 11, ds->name11_12, 2);
+		fatx16_towchar(*unicode + offset, ds->name0_4, 5);
+		fatx16_towchar(*unicode + offset + 5, ds->name5_10, 6);
+		fatx16_towchar(*unicode + offset + 11, ds->name11_12, 2);
 
 		if (ds->id & 0x40)
 			(*unicode)[offset + 13] = 0;
-		if (fat_get_entry(dir, pos, bh, de) < 0)
+		if (fatx_get_entry(dir, pos, bh, de) < 0)
 			return PARSE_EOF;
 		if (slot == 0)
 			break;
-		ds = (struct msdos_dir_slot *)*de;
+		ds = (struct fatx_dir_slot *)*de;
 		if (ds->attr != ATTR_EXT)
 			return PARSE_NOT_LONGNAME;
 		if ((ds->id & ~0x40) != slot)
@@ -336,14 +336,14 @@ parse_long:
 		goto parse_long;
 	if (IS_FREE((*de)->name) || ((*de)->attr & ATTR_VOLUME))
 		return PARSE_INVALID;
-	if (fat_checksum((*de)->name) != alias_checksum)
+	if (fatx_checksum((*de)->name) != alias_checksum)
 		*nr_slots = 0;
 
 	return 0;
 }
 
 /**
- * fat_parse_short - Parse MS-DOS (short) directory entry.
+ * fatx_parse_short - Parse MS-DOS (short) directory entry.
  * @sb:		superblock
  * @de:		directory entry to parse
  * @name:	FAT_MAX_SHORT_SIZE array in which to place extracted name
@@ -351,17 +351,17 @@ parse_long:
  *
  * Returns the number of characters extracted into 'name'.
  */
-static int fat_parse_short(struct super_block *sb,
-			   const struct msdos_dir_entry *de,
+static int fatx_parse_short(struct super_block *sb,
+			   const struct fatx_dir_entry *de,
 			   unsigned char *name, int dot_hidden)
 {
-	const struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	const struct fatx_sb_info *sbi = FATX_SB(sb);
 	int isvfat = sbi->options.isvfat;
 	int nocase = sbi->options.nocase;
 	unsigned short opt_shortname = sbi->options.shortname;
 	struct nls_table *nls_disk = sbi->nls_disk;
 	wchar_t uni_name[14];
-	unsigned char c, work[MSDOS_NAME];
+	unsigned char c, work[FATX_NAME];
 	unsigned char *ptname = name;
 	int chi, chl, i, j, k;
 	int dotoffset = 0;
@@ -373,7 +373,7 @@ static int fat_parse_short(struct super_block *sb,
 	}
 
 	memcpy(work, de->name, sizeof(work));
-	/* see namei.c, msdos_format_name */
+	/* see namei.c, fatx_format_name */
 	if (work[0] == 0x05)
 		work[0] = 0xE5;
 
@@ -382,12 +382,12 @@ static int fat_parse_short(struct super_block *sb,
 		c = work[i];
 		if (!c)
 			break;
-		chl = fat_shortname2uni(nls_disk, &work[i], 8 - i,
+		chl = fatx_shortname2uni(nls_disk, &work[i], 8 - i,
 					&uni_name[j++], opt_shortname,
 					de->lcase & CASE_LOWER_BASE);
 		if (chl <= 1) {
 			if (!isvfat)
-				ptname[i] = nocase ? c : fat_tolower(c);
+				ptname[i] = nocase ? c : fatx_tolower(c);
 			i++;
 			if (c != ' ') {
 				name_len = i;
@@ -408,23 +408,23 @@ static int fat_parse_short(struct super_block *sb,
 
 	i = name_len;
 	j = uni_len;
-	fat_short2uni(nls_disk, ".", 1, &uni_name[j++]);
+	fatx_short2uni(nls_disk, ".", 1, &uni_name[j++]);
 	if (!isvfat)
 		ptname[i] = '.';
 	i++;
 
 	/* Extension */
-	for (k = 8; k < MSDOS_NAME;) {
+	for (k = 8; k < FATX_NAME;) {
 		c = work[k];
 		if (!c)
 			break;
-		chl = fat_shortname2uni(nls_disk, &work[k], MSDOS_NAME - k,
+		chl = fatx_shortname2uni(nls_disk, &work[k], FATX_NAME - k,
 					&uni_name[j++], opt_shortname,
 					de->lcase & CASE_LOWER_EXT);
 		if (chl <= 1) {
 			k++;
 			if (!isvfat)
-				ptname[i] = nocase ? c : fat_tolower(c);
+				ptname[i] = nocase ? c : fatx_tolower(c);
 			i++;
 			if (c != ' ') {
 				name_len = i;
@@ -433,11 +433,11 @@ static int fat_parse_short(struct super_block *sb,
 		} else {
 			uni_len = j;
 			if (isvfat) {
-				int offset = min(chl, MSDOS_NAME-k);
+				int offset = min(chl, FATX_NAME-k);
 				k += offset;
 				i += offset;
 			} else {
-				for (chi = 0; chi < chl && k < MSDOS_NAME;
+				for (chi = 0; chi < chl && k < FATX_NAME;
 				     chi++, i++, k++) {
 						ptname[i] = work[k];
 				}
@@ -452,8 +452,8 @@ static int fat_parse_short(struct super_block *sb,
 
 		if (sbi->options.isvfat) {
 			uni_name[uni_len] = 0x0000;
-			name_len = fat_uni_to_x8(sb, uni_name, name,
-						 FAT_MAX_SHORT_SIZE);
+			name_len = fatx_uni_to_x8(sb, uni_name, name,
+						 FATX_MAX_SHORT_SIZE);
 		}
 	}
 
@@ -463,22 +463,22 @@ static int fat_parse_short(struct super_block *sb,
 /*
  * Return values: negative -> error/not found, 0 -> found.
  */
-int fat_search_long(struct inode *inode, const unsigned char *name,
-		    int name_len, struct fat_slot_info *sinfo)
+int fatx_search_long(struct inode *inode, const unsigned char *name,
+		    int name_len, struct fatx_slot_info *sinfo)
 {
 	struct super_block *sb = inode->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bh = NULL;
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	unsigned char nr_slots;
 	wchar_t *unicode = NULL;
-	unsigned char bufname[FAT_MAX_SHORT_SIZE];
+	unsigned char bufname[FATX_MAX_SHORT_SIZE];
 	loff_t cpos = 0;
 	int err, len;
 
 	err = -ENOENT;
 	while (1) {
-		if (fat_get_entry(inode, &cpos, &bh, &de) == -1)
+		if (fatx_get_entry(inode, &cpos, &bh, &de) == -1)
 			goto end_of_dir;
 parse_record:
 		nr_slots = 0;
@@ -489,7 +489,7 @@ parse_record:
 		if (de->attr != ATTR_EXT && IS_FREE(de->name))
 			continue;
 		if (de->attr == ATTR_EXT) {
-			int status = fat_parse_long(inode, &cpos, &bh, &de,
+			int status = fatx_parse_long(inode, &cpos, &bh, &de,
 						    &unicode, &nr_slots);
 			if (status < 0) {
 				err = status;
@@ -507,21 +507,21 @@ parse_record:
 		 * 'dotsOK=yes'); if we are executing here, it is in the
 		 * context of a vfat mount.
 		 */
-		len = fat_parse_short(sb, de, bufname, 0);
+		len = fatx_parse_short(sb, de, bufname, 0);
 		if (len == 0)
 			continue;
 
 		/* Compare shortname */
-		if (fat_name_match(sbi, name, name_len, bufname, len))
+		if (fatx_name_match(sbi, name, name_len, bufname, len))
 			goto found;
 
 		if (nr_slots) {
-			void *longname = unicode + FAT_MAX_UNI_CHARS;
-			int size = PATH_MAX - FAT_MAX_UNI_SIZE;
+			void *longname = unicode + FATX_MAX_UNI_CHARS;
+			int size = PATH_MAX - FATX_MAX_UNI_SIZE;
 
 			/* Compare longname */
-			len = fat_uni_to_x8(sb, unicode, longname, size);
-			if (fat_name_match(sbi, name, name_len, longname, len))
+			len = fatx_uni_to_x8(sb, unicode, longname, size);
+			if (fatx_name_match(sbi, name, name_len, longname, len))
 				goto found;
 		}
 	}
@@ -532,7 +532,7 @@ found:
 	sinfo->nr_slots = nr_slots;
 	sinfo->de = de;
 	sinfo->bh = bh;
-	sinfo->i_pos = fat_make_i_pos(sb, sinfo->bh, sinfo->de);
+	sinfo->i_pos = fatx_make_i_pos(sb, sinfo->bh, sinfo->de);
 	err = 0;
 end_of_dir:
 	if (unicode)
@@ -540,9 +540,9 @@ end_of_dir:
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(fat_search_long);
+EXPORT_SYMBOL_GPL(fatx_search_long);
 
-struct fat_ioctl_filldir_callback {
+struct fatx_ioctl_filldir_callback {
 	void __user *dirent;
 	int result;
 	/* for dir ioctl */
@@ -552,16 +552,16 @@ struct fat_ioctl_filldir_callback {
 	int short_len;
 };
 
-static int __fat_readdir(struct inode *inode, struct file *filp, void *dirent,
+static int __fatx_readdir(struct inode *inode, struct file *filp, void *dirent,
 			 filldir_t filldir, int short_only, int both)
 {
 	struct super_block *sb = inode->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bh;
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	unsigned char nr_slots;
 	wchar_t *unicode = NULL;
-	unsigned char bufname[FAT_MAX_SHORT_SIZE];
+	unsigned char bufname[FATX_MAX_SHORT_SIZE];
 	int isvfat = sbi->options.isvfat;
 	const char *fill_name = NULL;
 	unsigned long inum;
@@ -574,10 +574,10 @@ static int __fat_readdir(struct inode *inode, struct file *filp, void *dirent,
 
 	cpos = filp->f_pos;
 	/* Fake . and .. for the root directory. */
-	if (inode->i_ino == MSDOS_ROOT_INO) {
+	if (inode->i_ino == FATX_ROOT_INO) {
 		while (cpos < 2) {
 			if (filldir(dirent, "..", cpos+1, cpos,
-				    MSDOS_ROOT_INO, DT_DIR) < 0)
+				    FATX_ROOT_INO, DT_DIR) < 0)
 				goto out;
 			cpos++;
 			filp->f_pos++;
@@ -588,14 +588,14 @@ static int __fat_readdir(struct inode *inode, struct file *filp, void *dirent,
 			cpos = 0;
 		}
 	}
-	if (cpos & (sizeof(struct msdos_dir_entry) - 1)) {
+	if (cpos & (sizeof(struct fatx_dir_entry) - 1)) {
 		ret = -ENOENT;
 		goto out;
 	}
 
 	bh = NULL;
 get_new:
-	if (fat_get_entry(inode, &cpos, &bh, &de) == -1)
+	if (fatx_get_entry(inode, &cpos, &bh, &de) == -1)
 		goto end_of_dir;
 parse_record:
 	nr_slots = 0;
@@ -616,7 +616,7 @@ parse_record:
 	}
 
 	if (isvfat && de->attr == ATTR_EXT) {
-		int status = fat_parse_long(inode, &cpos, &bh, &de,
+		int status = fatx_parse_long(inode, &cpos, &bh, &de,
 					    &unicode, &nr_slots);
 		if (status < 0) {
 			filp->f_pos = cpos;
@@ -630,9 +630,9 @@ parse_record:
 			goto end_of_dir;
 
 		if (nr_slots) {
-			void *longname = unicode + FAT_MAX_UNI_CHARS;
-			int size = PATH_MAX - FAT_MAX_UNI_SIZE;
-			int len = fat_uni_to_x8(sb, unicode, longname, size);
+			void *longname = unicode + FATX_MAX_UNI_CHARS;
+			int size = PATH_MAX - FATX_MAX_UNI_SIZE;
+			int len = fatx_uni_to_x8(sb, unicode, longname, size);
 
 			fill_name = longname;
 			fill_len = len;
@@ -642,13 +642,13 @@ parse_record:
 		}
 	}
 
-	short_len = fat_parse_short(sb, de, bufname, sbi->options.dotsOK);
+	short_len = fatx_parse_short(sb, de, bufname, sbi->options.dotsOK);
 	if (short_len == 0)
 		goto record_end;
 
 	if (nr_slots) {
 		/* hack for fat_ioctl_filldir() */
-		struct fat_ioctl_filldir_callback *p = dirent;
+		struct fatx_ioctl_filldir_callback *p = dirent;
 
 		p->longname = fill_name;
 		p->long_len = fill_len;
@@ -662,19 +662,19 @@ parse_record:
 	}
 
 start_filldir:
-	lpos = cpos - (nr_slots + 1) * sizeof(struct msdos_dir_entry);
-	if (!memcmp(de->name, MSDOS_DOT, MSDOS_NAME))
+	lpos = cpos - (nr_slots + 1) * sizeof(struct fatx_dir_entry);
+	if (!memcmp(de->name, FATX_DOT, FATX_NAME))
 		inum = inode->i_ino;
-	else if (!memcmp(de->name, MSDOS_DOTDOT, MSDOS_NAME)) {
+	else if (!memcmp(de->name, FATX_DOTDOT, FATX_NAME)) {
 		inum = parent_ino(filp->f_path.dentry);
 	} else {
-		loff_t i_pos = fat_make_i_pos(sb, bh, de);
-		struct inode *tmp = fat_iget(sb, i_pos);
+		loff_t i_pos = fatx_make_i_pos(sb, bh, de);
+		struct inode *tmp = fatx_iget(sb, i_pos);
 		if (tmp) {
 			inum = tmp->i_ino;
 			iput(tmp);
 		} else
-			inum = iunique(sb, MSDOS_ROOT_INO);
+			inum = iunique(sb, FATX_ROOT_INO);
 	}
 
 	if (filldir(dirent, fill_name, fill_len, *furrfu, inum,
@@ -696,17 +696,17 @@ out:
 	return ret;
 }
 
-static int fat_readdir(struct file *filp, void *dirent, filldir_t filldir)
+static int fatx_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
 	struct inode *inode = file_inode(filp);
-	return __fat_readdir(inode, filp, dirent, filldir, 0, 0);
+	return __fatx_readdir(inode, filp, dirent, filldir, 0, 0);
 }
 
-#define FAT_IOCTL_FILLDIR_FUNC(func, dirent_type)			   \
+#define FATX_IOCTL_FILLDIR_FUNC(func, dirent_type)			   \
 static int func(void *__buf, const char *name, int name_len,		   \
 			     loff_t offset, u64 ino, unsigned int d_type)  \
 {									   \
-	struct fat_ioctl_filldir_callback *buf = __buf;			   \
+	struct fatx_ioctl_filldir_callback *buf = __buf;			   \
 	struct dirent_type __user *d1 = buf->dirent;			   \
 	struct dirent_type __user *d2 = d1 + 1;				   \
 									   \
@@ -753,13 +753,13 @@ efault:									   \
 	return -EFAULT;							   \
 }
 
-FAT_IOCTL_FILLDIR_FUNC(fat_ioctl_filldir, __fat_dirent)
+FATX_IOCTL_FILLDIR_FUNC(fatx_ioctl_filldir, __fatx_dirent)
 
-static int fat_ioctl_readdir(struct inode *inode, struct file *filp,
+static int fatx_ioctl_readdir(struct inode *inode, struct file *filp,
 			     void __user *dirent, filldir_t filldir,
 			     int short_only, int both)
 {
-	struct fat_ioctl_filldir_callback buf;
+	struct fatx_ioctl_filldir_callback buf;
 	int ret;
 
 	buf.dirent = dirent;
@@ -767,7 +767,7 @@ static int fat_ioctl_readdir(struct inode *inode, struct file *filp,
 	mutex_lock(&inode->i_mutex);
 	ret = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
-		ret = __fat_readdir(inode, filp, &buf, filldir,
+		ret = __fatx_readdir(inode, filp, &buf, filldir,
 				    short_only, both);
 	}
 	mutex_unlock(&inode->i_mutex);
@@ -776,11 +776,11 @@ static int fat_ioctl_readdir(struct inode *inode, struct file *filp,
 	return ret;
 }
 
-static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
+static long fatx_dir_ioctl(struct file *filp, unsigned int cmd,
 			  unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
-	struct __fat_dirent __user *d1 = (struct __fat_dirent __user *)arg;
+	struct __fatx_dirent __user *d1 = (struct __fatx_dirent __user *)arg;
 	int short_only, both;
 
 	switch (cmd) {
@@ -793,10 +793,10 @@ static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 		both = 1;
 		break;
 	default:
-		return fat_generic_ioctl(filp, cmd, arg);
+		return fatx_generic_ioctl(filp, cmd, arg);
 	}
 
-	if (!access_ok(VERIFY_WRITE, d1, sizeof(struct __fat_dirent[2])))
+	if (!access_ok(VERIFY_WRITE, d1, sizeof(struct __fatx_dirent[2])))
 		return -EFAULT;
 	/*
 	 * Yes, we don't need this put_user() absolutely. However old
@@ -806,7 +806,7 @@ static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 	if (put_user(0, &d1->d_reclen))
 		return -EFAULT;
 
-	return fat_ioctl_readdir(inode, filp, d1, fat_ioctl_filldir,
+	return fatx_ioctl_readdir(inode, filp, d1, fatx_ioctl_filldir,
 				 short_only, both);
 }
 
@@ -814,9 +814,9 @@ static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 #define	VFAT_IOCTL_READDIR_BOTH32	_IOR('r', 1, struct compat_dirent[2])
 #define	VFAT_IOCTL_READDIR_SHORT32	_IOR('r', 2, struct compat_dirent[2])
 
-FAT_IOCTL_FILLDIR_FUNC(fat_compat_ioctl_filldir, compat_dirent)
+FATX_IOCTL_FILLDIR_FUNC(fatx_compat_ioctl_filldir, compat_dirent)
 
-static long fat_compat_dir_ioctl(struct file *filp, unsigned cmd,
+static long fatx_compat_dir_ioctl(struct file *filp, unsigned cmd,
 				 unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -833,7 +833,7 @@ static long fat_compat_dir_ioctl(struct file *filp, unsigned cmd,
 		both = 1;
 		break;
 	default:
-		return fat_generic_ioctl(filp, cmd, (unsigned long)arg);
+		return fatx_generic_ioctl(filp, cmd, (unsigned long)arg);
 	}
 
 	if (!access_ok(VERIFY_WRITE, d1, sizeof(struct compat_dirent[2])))
@@ -846,27 +846,27 @@ static long fat_compat_dir_ioctl(struct file *filp, unsigned cmd,
 	if (put_user(0, &d1->d_reclen))
 		return -EFAULT;
 
-	return fat_ioctl_readdir(inode, filp, d1, fat_compat_ioctl_filldir,
+	return fatx_ioctl_readdir(inode, filp, d1, fatx_compat_ioctl_filldir,
 				 short_only, both);
 }
 #endif /* CONFIG_COMPAT */
 
-const struct file_operations fat_dir_operations = {
+const struct file_operations fatx_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
-	.readdir	= fat_readdir,
-	.unlocked_ioctl	= fat_dir_ioctl,
+	.readdir	= fatx_readdir,
+	.unlocked_ioctl	= fatx_dir_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl	= fat_compat_dir_ioctl,
+	.compat_ioctl	= fatx_compat_dir_ioctl,
 #endif
-	.fsync		= fat_file_fsync,
+	.fsync		= fatx_file_fsync,
 };
 
-static int fat_get_short_entry(struct inode *dir, loff_t *pos,
+static int fatx_get_short_entry(struct inode *dir, loff_t *pos,
 			       struct buffer_head **bh,
-			       struct msdos_dir_entry **de)
+			       struct fatx_dir_entry **de)
 {
-	while (fat_get_entry(dir, pos, bh, de) >= 0) {
+	while (fatx_get_entry(dir, pos, bh, de) >= 0) {
 		/* free entry or long name entry or volume label */
 		if (!IS_FREE((*de)->name) && !((*de)->attr & ATTR_VOLUME))
 			return 0;
@@ -883,33 +883,33 @@ static int fat_get_short_entry(struct inode *dir, loff_t *pos,
  * callers are responsible for taking any locks necessary to prevent the
  * directory from changing.
  */
-int fat_get_dotdot_entry(struct inode *dir, struct buffer_head **bh,
-			 struct msdos_dir_entry **de)
+int fatx_get_dotdot_entry(struct inode *dir, struct buffer_head **bh,
+			 struct fatx_dir_entry **de)
 {
 	loff_t offset = 0;
 
 	*de = NULL;
-	while (fat_get_short_entry(dir, &offset, bh, de) >= 0) {
-		if (!strncmp((*de)->name, MSDOS_DOTDOT, MSDOS_NAME))
+	while (fatx_get_short_entry(dir, &offset, bh, de) >= 0) {
+		if (!strncmp((*de)->name, FATX_DOTDOT, FATX_NAME))
 			return 0;
 	}
 	return -ENOENT;
 }
-EXPORT_SYMBOL_GPL(fat_get_dotdot_entry);
+EXPORT_SYMBOL_GPL(fatx_get_dotdot_entry);
 
 /* See if directory is empty */
-int fat_dir_empty(struct inode *dir)
+int fatx_dir_empty(struct inode *dir)
 {
 	struct buffer_head *bh;
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	loff_t cpos;
 	int result = 0;
 
 	bh = NULL;
 	cpos = 0;
-	while (fat_get_short_entry(dir, &cpos, &bh, &de) >= 0) {
-		if (strncmp(de->name, MSDOS_DOT   , MSDOS_NAME) &&
-		    strncmp(de->name, MSDOS_DOTDOT, MSDOS_NAME)) {
+	while (fatx_get_short_entry(dir, &cpos, &bh, &de) >= 0) {
+		if (strncmp(de->name, FATX_DOT   , FATX_NAME) &&
+		    strncmp(de->name, FATX_DOTDOT, FATX_NAME)) {
 			result = -ENOTEMPTY;
 			break;
 		}
@@ -917,22 +917,22 @@ int fat_dir_empty(struct inode *dir)
 	brelse(bh);
 	return result;
 }
-EXPORT_SYMBOL_GPL(fat_dir_empty);
+EXPORT_SYMBOL_GPL(fatx_dir_empty);
 
 /*
- * fat_subdirs counts the number of sub-directories of dir. It can be run
+ * fatx_subdirs counts the number of sub-directories of dir. It can be run
  * on directories being created.
  */
-int fat_subdirs(struct inode *dir)
+int fatx_subdirs(struct inode *dir)
 {
 	struct buffer_head *bh;
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	loff_t cpos;
 	int count = 0;
 
 	bh = NULL;
 	cpos = 0;
-	while (fat_get_short_entry(dir, &cpos, &bh, &de) >= 0) {
+	while (fatx_get_short_entry(dir, &cpos, &bh, &de) >= 0) {
 		if (de->attr & ATTR_DIR)
 			count++;
 	}
@@ -944,65 +944,65 @@ int fat_subdirs(struct inode *dir)
  * Scans a directory for a given file (name points to its formatted name).
  * Returns an error code or zero.
  */
-int fat_scan(struct inode *dir, const unsigned char *name,
-	     struct fat_slot_info *sinfo)
+int fatx_scan(struct inode *dir, const unsigned char *name,
+	     struct fatx_slot_info *sinfo)
 {
 	struct super_block *sb = dir->i_sb;
 
 	sinfo->slot_off = 0;
 	sinfo->bh = NULL;
-	while (fat_get_short_entry(dir, &sinfo->slot_off, &sinfo->bh,
+	while (fatx_get_short_entry(dir, &sinfo->slot_off, &sinfo->bh,
 				   &sinfo->de) >= 0) {
-		if (!strncmp(sinfo->de->name, name, MSDOS_NAME)) {
+		if (!strncmp(sinfo->de->name, name, FATX_NAME)) {
 			sinfo->slot_off -= sizeof(*sinfo->de);
 			sinfo->nr_slots = 1;
-			sinfo->i_pos = fat_make_i_pos(sb, sinfo->bh, sinfo->de);
+			sinfo->i_pos = fatx_make_i_pos(sb, sinfo->bh, sinfo->de);
 			return 0;
 		}
 	}
 	return -ENOENT;
 }
-EXPORT_SYMBOL_GPL(fat_scan);
+EXPORT_SYMBOL_GPL(fatx_scan);
 
 /*
  * Scans a directory for a given logstart.
  * Returns an error code or zero.
  */
-int fat_scan_logstart(struct inode *dir, int i_logstart,
-		      struct fat_slot_info *sinfo)
+int fatx_scan_logstart(struct inode *dir, int i_logstart,
+		      struct fatx_slot_info *sinfo)
 {
 	struct super_block *sb = dir->i_sb;
 
 	sinfo->slot_off = 0;
 	sinfo->bh = NULL;
-	while (fat_get_short_entry(dir, &sinfo->slot_off, &sinfo->bh,
+	while (fatx_get_short_entry(dir, &sinfo->slot_off, &sinfo->bh,
 				   &sinfo->de) >= 0) {
-		if (fat_get_start(MSDOS_SB(sb), sinfo->de) == i_logstart) {
+		if (fatx_get_start(FATX_SB(sb), sinfo->de) == i_logstart) {
 			sinfo->slot_off -= sizeof(*sinfo->de);
 			sinfo->nr_slots = 1;
-			sinfo->i_pos = fat_make_i_pos(sb, sinfo->bh, sinfo->de);
+			sinfo->i_pos = fatx_make_i_pos(sb, sinfo->bh, sinfo->de);
 			return 0;
 		}
 	}
 	return -ENOENT;
 }
 
-static int __fat_remove_entries(struct inode *dir, loff_t pos, int nr_slots)
+static int __fatx_remove_entries(struct inode *dir, loff_t pos, int nr_slots)
 {
 	struct super_block *sb = dir->i_sb;
 	struct buffer_head *bh;
-	struct msdos_dir_entry *de, *endp;
+	struct fatx_dir_entry *de, *endp;
 	int err = 0, orig_slots;
 
 	while (nr_slots) {
 		bh = NULL;
-		if (fat_get_entry(dir, &pos, &bh, &de) < 0) {
+		if (fatx_get_entry(dir, &pos, &bh, &de) < 0) {
 			err = -EIO;
 			break;
 		}
 
 		orig_slots = nr_slots;
-		endp = (struct msdos_dir_entry *)(bh->b_data + sb->s_blocksize);
+		endp = (struct fatx_dir_entry *)(bh->b_data + sb->s_blocksize);
 		while (nr_slots && de < endp) {
 			de->name[0] = DELETED_FLAG;
 			de++;
@@ -1022,10 +1022,10 @@ static int __fat_remove_entries(struct inode *dir, loff_t pos, int nr_slots)
 	return err;
 }
 
-int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo)
+int fatx_remove_entries(struct inode *dir, struct fatx_slot_info *sinfo)
 {
 	struct super_block *sb = dir->i_sb;
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	struct buffer_head *bh;
 	int err = 0, nr_slots;
 
@@ -1038,7 +1038,7 @@ int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo)
 	sinfo->de = NULL;
 	bh = sinfo->bh;
 	sinfo->bh = NULL;
-	while (nr_slots && de >= (struct msdos_dir_entry *)bh->b_data) {
+	while (nr_slots && de >= (struct fatx_dir_entry *)bh->b_data) {
 		de->name[0] = DELETED_FLAG;
 		de--;
 		nr_slots--;
@@ -1057,28 +1057,28 @@ int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo)
 		 * (This directory entry is already removed, and so return
 		 * the success)
 		 */
-		err = __fat_remove_entries(dir, sinfo->slot_off, nr_slots);
+		err = __fatx_remove_entries(dir, sinfo->slot_off, nr_slots);
 		if (err) {
-			fat_msg(sb, KERN_WARNING,
+			fatx_msg(sb, KERN_WARNING,
 			       "Couldn't remove the long name slots");
 		}
 	}
 
 	dir->i_mtime = dir->i_atime = CURRENT_TIME_SEC;
 	if (IS_DIRSYNC(dir))
-		(void)fat_sync_inode(dir);
+		(void)fatx_sync_inode(dir);
 	else
 		mark_inode_dirty(dir);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(fat_remove_entries);
+EXPORT_SYMBOL_GPL(fatx_remove_entries);
 
-static int fat_zeroed_cluster(struct inode *dir, sector_t blknr, int nr_used,
+static int fatx_zeroed_cluster(struct inode *dir, sector_t blknr, int nr_used,
 			      struct buffer_head **bhs, int nr_bhs)
 {
 	struct super_block *sb = dir->i_sb;
-	sector_t last_blknr = blknr + MSDOS_SB(sb)->sec_per_clus;
+	sector_t last_blknr = blknr + FATX_SB(sb)->sec_per_clus;
 	int err, i, n;
 
 	/* Zeroing the unused blocks on this cluster */
@@ -1098,7 +1098,7 @@ static int fat_zeroed_cluster(struct inode *dir, sector_t blknr, int nr_used,
 		blknr++;
 		if (n == nr_bhs) {
 			if (IS_DIRSYNC(dir)) {
-				err = fat_sync_bhs(bhs, n);
+				err = fatx_sync_bhs(bhs, n);
 				if (err)
 					goto error;
 			}
@@ -1108,7 +1108,7 @@ static int fat_zeroed_cluster(struct inode *dir, sector_t blknr, int nr_used,
 		}
 	}
 	if (IS_DIRSYNC(dir)) {
-		err = fat_sync_bhs(bhs, n);
+		err = fatx_sync_bhs(bhs, n);
 		if (err)
 			goto error;
 	}
@@ -1123,34 +1123,34 @@ error:
 	return err;
 }
 
-int fat_alloc_new_dir(struct inode *dir, struct timespec *ts)
+int fatx_alloc_new_dir(struct inode *dir, struct timespec *ts)
 {
 	struct super_block *sb = dir->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	sector_t blknr;
 	__le16 date, time;
 	u8 time_cs;
 	int err, cluster;
 
-	err = fat_alloc_clusters(dir, &cluster, 1);
+	err = fatx_alloc_clusters(dir, &cluster, 1);
 	if (err)
 		goto error;
 
-	blknr = fat_clus_to_blknr(sbi, cluster);
+	blknr = fatx_clus_to_blknr(sbi, cluster);
 	bhs[0] = sb_getblk(sb, blknr);
 	if (!bhs[0]) {
 		err = -ENOMEM;
 		goto error_free;
 	}
 
-	fat_time_unix2fat(sbi, ts, &time, &date, &time_cs);
+	fatx_time_unix2fat(sbi, ts, &time, &date, &time_cs);
 
-	de = (struct msdos_dir_entry *)bhs[0]->b_data;
+	de = (struct fatx_dir_entry *)bhs[0]->b_data;
 	/* filling the new directory slots ("." and ".." entries) */
-	memcpy(de[0].name, MSDOS_DOT, MSDOS_NAME);
-	memcpy(de[1].name, MSDOS_DOTDOT, MSDOS_NAME);
+	memcpy(de[0].name, FATX_DOT, FATX_NAME);
+	memcpy(de[1].name, FATX_DOTDOT, FATX_NAME);
 	de->attr = de[1].attr = ATTR_DIR;
 	de[0].lcase = de[1].lcase = 0;
 	de[0].time = de[1].time = time;
@@ -1165,32 +1165,32 @@ int fat_alloc_new_dir(struct inode *dir, struct timespec *ts)
 		de[0].ctime_cs = de[1].ctime_cs = 0;
 		de[0].adate = de[0].cdate = de[1].adate = de[1].cdate = 0;
 	}
-	fat_set_start(&de[0], cluster);
-	fat_set_start(&de[1], MSDOS_I(dir)->i_logstart);
+	fatx_set_start(&de[0], cluster);
+	fatx_set_start(&de[1], FATX_I(dir)->i_logstart);
 	de[0].size = de[1].size = 0;
 	memset(de + 2, 0, sb->s_blocksize - 2 * sizeof(*de));
 	set_buffer_uptodate(bhs[0]);
 	mark_buffer_dirty_inode(bhs[0], dir);
 
-	err = fat_zeroed_cluster(dir, blknr, 1, bhs, MAX_BUF_PER_PAGE);
+	err = fatx_zeroed_cluster(dir, blknr, 1, bhs, MAX_BUF_PER_PAGE);
 	if (err)
 		goto error_free;
 
 	return cluster;
 
 error_free:
-	fat_free_clusters(dir, cluster);
+	fatx_free_clusters(dir, cluster);
 error:
 	return err;
 }
-EXPORT_SYMBOL_GPL(fat_alloc_new_dir);
+EXPORT_SYMBOL_GPL(fatx_alloc_new_dir);
 
-static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
-			       int *nr_cluster, struct msdos_dir_entry **de,
+static int fatx_add_new_entries(struct inode *dir, void *slots, int nr_slots,
+			       int *nr_cluster, struct fatx_dir_entry **de,
 			       struct buffer_head **bh, loff_t *i_pos)
 {
 	struct super_block *sb = dir->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
 	sector_t blknr, start_blknr, last_blknr;
 	unsigned long size, copy;
@@ -1201,11 +1201,11 @@ static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
 	 * size is 32*slots (672bytes).  So, iff the cluster size is
 	 * 512bytes, we may need two clusters.
 	 */
-	size = nr_slots * sizeof(struct msdos_dir_entry);
+	size = nr_slots * sizeof(struct fatx_dir_entry);
 	*nr_cluster = (size + (sbi->cluster_size - 1)) >> sbi->cluster_bits;
 	BUG_ON(*nr_cluster > 2);
 
-	err = fat_alloc_clusters(dir, cluster, *nr_cluster);
+	err = fatx_alloc_clusters(dir, cluster, *nr_cluster);
 	if (err)
 		goto error;
 
@@ -1216,7 +1216,7 @@ static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
 	 */
 	i = n = copy = 0;
 	do {
-		start_blknr = blknr = fat_clus_to_blknr(sbi, cluster[i]);
+		start_blknr = blknr = fatx_clus_to_blknr(sbi, cluster[i]);
 		last_blknr = start_blknr + sbi->sec_per_clus;
 		while (blknr < last_blknr) {
 			bhs[n] = sb_getblk(sb, blknr);
@@ -1240,14 +1240,14 @@ static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
 	} while (++i < *nr_cluster);
 
 	memset(bhs[n]->b_data + copy, 0, sb->s_blocksize - copy);
-	offset = copy - sizeof(struct msdos_dir_entry);
+	offset = copy - sizeof(struct fatx_dir_entry);
 	get_bh(bhs[n]);
 	*bh = bhs[n];
-	*de = (struct msdos_dir_entry *)((*bh)->b_data + offset);
-	*i_pos = fat_make_i_pos(sb, *bh, *de);
+	*de = (struct fatx_dir_entry *)((*bh)->b_data + offset);
+	*i_pos = fatx_make_i_pos(sb, *bh, *de);
 
 	/* Second stage: clear the rest of cluster, and write outs */
-	err = fat_zeroed_cluster(dir, start_blknr, ++n, bhs, MAX_BUF_PER_PAGE);
+	err = fatx_zeroed_cluster(dir, start_blknr, ++n, bhs, MAX_BUF_PER_PAGE);
 	if (err)
 		goto error_free;
 
@@ -1260,18 +1260,18 @@ error_free:
 error_nomem:
 	for (i = 0; i < n; i++)
 		bforget(bhs[i]);
-	fat_free_clusters(dir, cluster[0]);
+	fatx_free_clusters(dir, cluster[0]);
 error:
 	return err;
 }
 
-int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
-		    struct fat_slot_info *sinfo)
+int fatx_add_entries(struct inode *dir, void *slots, int nr_slots,
+		    struct fatx_slot_info *sinfo)
 {
 	struct super_block *sb = dir->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bh, *prev, *bhs[3]; /* 32*slots (672bytes) */
-	struct msdos_dir_entry *uninitialized_var(de);
+	struct fatx_dir_entry *uninitialized_var(de);
 	int err, free_slots, i, nr_bhs;
 	loff_t pos, i_pos;
 
@@ -1282,9 +1282,9 @@ int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
 	bh = prev = NULL;
 	pos = 0;
 	err = -ENOSPC;
-	while (fat_get_entry(dir, &pos, &bh, &de) > -1) {
+	while (fatx_get_entry(dir, &pos, &bh, &de) > -1) {
 		/* check the maximum size of directory */
-		if (pos >= FAT_MAX_DIR_SIZE)
+		if (pos >= FATX_MAX_DIR_SIZE)
 			goto error;
 
 		if (IS_FREE(de->name)) {
@@ -1303,12 +1303,12 @@ int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
 			free_slots = nr_bhs = 0;
 		}
 	}
-	if (dir->i_ino == MSDOS_ROOT_INO) {
-		if (sbi->fat_bits != 32)
+	if (dir->i_ino == FATX_ROOT_INO) {
+		if (sbi->fatx_bits != 32)
 			goto error;
-	} else if (MSDOS_I(dir)->i_start == 0) {
-		fat_msg(sb, KERN_ERR, "Corrupted directory (i_pos %lld)",
-		       MSDOS_I(dir)->i_pos);
+	} else if (FATX_I(dir)->i_start == 0) {
+		fatx_msg(sb, KERN_ERR, "Corrupted directory (i_pos %lld)",
+		       FATX_I(dir)->i_pos);
 		err = -EIO;
 		goto error;
 	}
@@ -1337,7 +1337,7 @@ found:
 			size -= copy;
 		}
 		if (long_bhs && IS_DIRSYNC(dir))
-			err = fat_sync_bhs(bhs, long_bhs);
+			err = fatx_sync_bhs(bhs, long_bhs);
 		if (!err && i < nr_bhs) {
 			/* Fill the short name slot. */
 			int copy = min_t(int, sb->s_blocksize - offset, size);
@@ -1360,29 +1360,29 @@ found:
 		 * And initialize the cluster with new entries, then
 		 * add the cluster to dir.
 		 */
-		cluster = fat_add_new_entries(dir, slots, nr_slots, &nr_cluster,
+		cluster = fatx_add_new_entries(dir, slots, nr_slots, &nr_cluster,
 					      &de, &bh, &i_pos);
 		if (cluster < 0) {
 			err = cluster;
 			goto error_remove;
 		}
-		err = fat_chain_add(dir, cluster, nr_cluster);
+		err = fatx_chain_add(dir, cluster, nr_cluster);
 		if (err) {
-			fat_free_clusters(dir, cluster);
+			fatx_free_clusters(dir, cluster);
 			goto error_remove;
 		}
 		if (dir->i_size & (sbi->cluster_size - 1)) {
-			fat_fs_error(sb, "Odd directory size");
+			fatx_fs_error(sb, "Odd directory size");
 			dir->i_size = (dir->i_size + sbi->cluster_size - 1)
 				& ~((loff_t)sbi->cluster_size - 1);
 		}
 		dir->i_size += nr_cluster << sbi->cluster_bits;
-		MSDOS_I(dir)->mmu_private += nr_cluster << sbi->cluster_bits;
+		FATX_I(dir)->mmu_private += nr_cluster << sbi->cluster_bits;
 	}
 	sinfo->slot_off = pos;
 	sinfo->de = de;
 	sinfo->bh = bh;
-	sinfo->i_pos = fat_make_i_pos(sb, sinfo->bh, sinfo->de);
+	sinfo->i_pos = fatx_make_i_pos(sb, sinfo->bh, sinfo->de);
 
 	return 0;
 
@@ -1395,7 +1395,7 @@ error:
 error_remove:
 	brelse(bh);
 	if (free_slots)
-		__fat_remove_entries(dir, pos, free_slots);
+		__fatx_remove_entries(dir, pos, free_slots);
 	return err;
 }
-EXPORT_SYMBOL_GPL(fat_add_entries);
+EXPORT_SYMBOL_GPL(fatx_add_entries);

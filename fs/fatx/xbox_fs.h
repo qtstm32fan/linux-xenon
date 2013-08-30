@@ -11,24 +11,24 @@
 
 #define SECTOR_SIZE	512		/* sector size (bytes) */
 #define SECTOR_BITS	9		/* log2(SECTOR_SIZE) */
-#define MSDOS_DPB	(MSDOS_DPS)	/* dir entries per block */
-#define MSDOS_DPB_BITS	4		/* log2(MSDOS_DPB) */
-#define MSDOS_DPS	(SECTOR_SIZE / sizeof(struct msdos_dir_entry))
-#define MSDOS_DPS_BITS	4		/* log2(MSDOS_DPS) */
-#define MSDOS_LONGNAME	256		/* maximum name length */
+#define FATX_DPB	(FATX_DPS)	/* dir entries per block */
+#define FATX_DPB_BITS	4		/* log2(FATX_DPB) */
+#define FATX_DPS	(SECTOR_SIZE / sizeof(struct fatx_dir_entry))
+#define FATX_DPS_BITS	4		/* log2(FATX_DPS) */
+#define FATX_LONGNAME	256		/* maximum name length */
 #define CF_LE_W(v)	le16_to_cpu(v)
 #define CF_LE_L(v)	le32_to_cpu(v)
 #define CT_LE_W(v)	cpu_to_le16(v)
 #define CT_LE_L(v)	cpu_to_le32(v)
 
-#define MSDOS_ROOT_INO	 1	/* The root inode number */
-#define MSDOS_FSINFO_INO 2	/* Used for managing the FSINFO block */
+#define FATX_ROOT_INO	 1	/* The root inode number */
+#define FATX_FSINFO_INO 2	/* Used for managing the FSINFO block */
 
-#define MSDOS_DIR_BITS	5	/* log2(sizeof(struct msdos_dir_entry)) */
+#define FATX_DIR_BITS	5	/* log2(sizeof(struct fatx_dir_entry)) */
 
 /* directory limit */
-#define FAT_MAX_DIR_ENTRIES	(65536)
-#define FAT_MAX_DIR_SIZE	(FAT_MAX_DIR_ENTRIES << MSDOS_DIR_BITS)
+#define FATX_MAX_DIR_ENTRIES	(65536)
+#define FATX_MAX_DIR_SIZE	(FATX_MAX_DIR_ENTRIES << FATX_DIR_BITS)
 
 #define ATTR_NONE	0	/* no attribute bits */
 #define ATTR_RO		1	/* read-only */
@@ -40,7 +40,7 @@
 
 /* attribute bits that are copied "as is" */
 #define ATTR_UNUSED	(ATTR_VOLUME | ATTR_ARCH | ATTR_SYS | ATTR_HIDDEN)
-/* bits that are used by the Windows 95/Windows NT extended FAT */
+/* bits that are used by the Windows 95/Windows NT extended FATX */
 #define ATTR_EXT	(ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME)
 
 #define CASE_LOWER_BASE	8	/* base is lower case */
@@ -49,47 +49,47 @@
 #define DELETED_FLAG	0xe5	/* marks file as deleted when in name[0] */
 #define IS_FREE(n)	(!*(n) || *(n) == DELETED_FLAG)
 
-#define FAT_LFN_LEN	255	/* maximum long name length */
-#define MSDOS_NAME	11	/* maximum name length */
-#define MSDOS_SLOTS	21	/* max # of slots for short and long names */
-#define MSDOS_DOT	".          "	/* ".", padded to MSDOS_NAME chars */
-#define MSDOS_DOTDOT	"..         "	/* "..", padded to MSDOS_NAME chars */
+#define FATX_LFN_LEN	255	/* maximum long name length */
+#define FATX_NAME	11	/* maximum name length */
+#define FATX_SLOTS	21	/* max # of slots for short and long names */
+#define FATX_DOT	".          "	/* ".", padded to FATX_NAME chars */
+#define FATX_DOTDOT	"..         "	/* "..", padded to FATX_NAME chars */
 
-#define FAT_FIRST_ENT(s, x)	((MSDOS_SB(s)->fat_bits == 32 ? 0x0FFFFF00 : \
-	MSDOS_SB(s)->fat_bits == 16 ? 0xFF00 : 0xF00) | (x))
+#define FATX_FIRST_ENT(s, x)	((FATX_SB(s)->fatx_bits == 32 ? 0x0FFFFF00 : \
+	FATX_SB(s)->fatx_bits == 16 ? 0xFF00 : 0xF00) | (x))
 
 /* start of data cluster's entry (number of reserved clusters) */
-#define FAT_START_ENT	2
+#define FATX_START_ENT	2
 
 /* maximum number of clusters */
-#define MAX_FAT12	0xFF4
-#define MAX_FAT16	0xFFF4
-#define MAX_FAT32	0x0FFFFFF6
-#define MAX_FAT(s)	(MSDOS_SB(s)->fat_bits == 32 ? MAX_FAT32 : \
-	MSDOS_SB(s)->fat_bits == 16 ? MAX_FAT16 : MAX_FAT12)
+#define MAX_FATX12	0xFF4
+#define MAX_FATX16	0xFFF4
+#define MAX_FATX32	0x0FFFFFF6
+#define MAX_FATX(s)	(FATX_SB(s)->fatx_bits == 32 ? MAX_FATX32 : \
+	FATX_SB(s)->fatx_bits == 16 ? MAX_FATX16 : MAX_FATX12)
 
 /* bad cluster mark */
-#define BAD_FAT12	0xFF7
-#define BAD_FAT16	0xFFF7
-#define BAD_FAT32	0x0FFFFFF7
+#define BAD_FATX12	0xFF7
+#define BAD_FATX16	0xFFF7
+#define BAD_FATX32	0x0FFFFFF7
 
 /* standard EOF */
-#define EOF_FAT12	0xFFF
-#define EOF_FAT16	0xFFFF
-#define EOF_FAT32	0x0FFFFFFF
+#define EOF_FATX12	0xFFF
+#define EOF_FATX16	0xFFFF
+#define EOF_FATX32	0x0FFFFFFF
 
-#define FAT_ENT_FREE	(0)
-#define FAT_ENT_BAD	(BAD_FAT32)
-#define FAT_ENT_EOF	(EOF_FAT32)
+#define FATX_ENT_FREE	(0)
+#define FATX_ENT_BAD	(BAD_FATX32)
+#define FATX_ENT_EOF	(EOF_FATX32)
 
-#define FAT_FSINFO_SIG1	0x41615252
-#define FAT_FSINFO_SIG2	0x61417272
-#define IS_FSINFO(x)	(le32_to_cpu((x)->signature1) == FAT_FSINFO_SIG1 \
-			 && le32_to_cpu((x)->signature2) == FAT_FSINFO_SIG2)
+#define FATX_FSINFO_SIG1	0x41615252
+#define FATX_FSINFO_SIG2	0x61417272
+#define IS_FSINFO(x)	(le32_to_cpu((x)->signature1) == FATX_FSINFO_SIG1 \
+			 && le32_to_cpu((x)->signature2) == FATX_FSINFO_SIG2)
 
-#define FAT_STATE_DIRTY 0x01
+#define FATX_STATE_DIRTY 0x01
 
-struct __fat_dirent {
+struct __fatx_dirent {
 	long		d_ino;
 	__kernel_off_t	d_off;
 	unsigned short	d_reclen;
@@ -99,24 +99,24 @@ struct __fat_dirent {
 /*
  * ioctl commands
  */
-#define VFAT_IOCTL_READDIR_BOTH		_IOR('r', 1, struct __fat_dirent[2])
-#define VFAT_IOCTL_READDIR_SHORT	_IOR('r', 2, struct __fat_dirent[2])
+#define VFAT_IOCTL_READDIR_BOTH		_IOR('r', 1, struct __fatx_dirent[2])
+#define VFAT_IOCTL_READDIR_SHORT	_IOR('r', 2, struct __fatx_dirent[2])
 /* <linux/videotext.h> has used 0x72 ('r') in collision, so skip a few */
-#define FAT_IOCTL_GET_ATTRIBUTES	_IOR('r', 0x10, __u32)
-#define FAT_IOCTL_SET_ATTRIBUTES	_IOW('r', 0x11, __u32)
+#define FATX_IOCTL_GET_ATTRIBUTES	_IOR('r', 0x10, __u32)
+#define FATX_IOCTL_SET_ATTRIBUTES	_IOW('r', 0x11, __u32)
 
-struct fat_boot_sector {
+struct fatx_boot_sector {
 	__u8	ignored[3];	/* Boot strap short or near jump */
 	__u8	system_id[8];	/* Name - can be used to special case
 				   partition manager volumes */
 	__u8	sector_size[2];	/* bytes per logical sector */
 	__u8	sec_per_clus;	/* sectors/cluster */
 	__le16	reserved;	/* reserved sectors */
-	__u8	fats;		/* number of FATs */
+	__u8	fatxs;		/* number of FATXs */
 	__u8	dir_entries[2];	/* root directory entries */
 	__u8	sectors[2];	/* number of sectors */
 	__u8	media;		/* media code */
-	__le16	fat_length;	/* sectors/FAT */
+	__le16	fatx_length;	/* sectors/FATX */
 	__le16	secs_track;	/* sectors per track */
 	__le16	heads;		/* number of heads */
 	__le32	hidden;		/* hidden sectors (unused) */
@@ -124,18 +124,18 @@ struct fat_boot_sector {
 
 	union {
 		struct {
-			/*  Extended BPB Fields for FAT16 */
+			/*  Extended BPB Fields for FATX16 */
 			__u8	drive_number;	/* Physical drive number */
 			__u8	state;		/* undocumented, but used
 						   for mount state. */
 			/* other fiealds are not added here */
-		} fat16;
+		} fatx16;
 
 		struct {
-			/* only used by FAT32 */
-			__le32	length;		/* sectors/FAT */
-			__le16	flags;		/* bit 8: fat mirroring,
-						   low 4: active fat */
+			/* only used by FATX32 */
+			__le32	length;		/* sectors/FATX */
+			__le16	flags;		/* bit 8: fatx mirroring,
+						   low 4: active fatx */
 			__u8	version[2];	/* major, minor filesystem
 						   version */
 			__le32	root_cluster;	/* first cluster in
@@ -143,16 +143,16 @@ struct fat_boot_sector {
 			__le16	info_sector;	/* filesystem info sector */
 			__le16	backup_boot;	/* backup boot sector */
 			__le16	reserved2[6];	/* Unused */
-			/* Extended BPB Fields for FAT32 */
+			/* Extended BPB Fields for FATX32 */
 			__u8	drive_number;   /* Physical drive number */
 			__u8    state;       	/* undocumented, but used
 						   for mount state. */
 			/* other fiealds are not added here */
-		} fat32;
+		} fatx32;
 	};
 };
 
-struct fat_boot_fsinfo {
+struct fatx_boot_fsinfo {
 	__le32   signature1;	/* 0x41615252L */
 	__le32   reserved1[120];	/* Nothing as far as I can tell */
 	__le32   signature2;	/* 0x61417272L */
@@ -161,21 +161,21 @@ struct fat_boot_fsinfo {
 	__le32   reserved2[4];
 };
 
-struct msdos_dir_entry {
-	__u8	name[MSDOS_NAME];/* name and extension */
+struct fatx_dir_entry {
+	__u8	name[FATX_NAME];/* name and extension */
 	__u8	attr;		/* attribute bits */
 	__u8    lcase;		/* Case for base and extension */
 	__u8	ctime_cs;	/* Creation time, centiseconds (0-199) */
 	__le16	ctime;		/* Creation time */
 	__le16	cdate;		/* Creation date */
 	__le16	adate;		/* Last access date */
-	__le16	starthi;	/* High 16 bits of cluster in FAT32 */
+	__le16	starthi;	/* High 16 bits of cluster in FATX32 */
 	__le16	time,date,start;/* time, date and first cluster */
 	__le32	size;		/* file size (in bytes) */
 };
 
 /* Up to 13 characters of the name */
-struct msdos_dir_slot {
+struct fatx_dir_slot {
 	__u8    id;		/* sequence number for slot */
 	__u8    name0_4[10];	/* first 5 characters in name */
 	__u8    attr;		/* attribute byte */
@@ -188,7 +188,7 @@ struct msdos_dir_slot {
 
 
 /* media of boot sector */
-static inline int fat_valid_media(u8 media)
+static inline int fatx_valid_media(u8 media)
 {
 	return 0xf8 <= media || media == 0xf0;
 }

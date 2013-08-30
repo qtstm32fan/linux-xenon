@@ -1,8 +1,8 @@
 /*
- *  linux/fs/fat/misc.c
+ *  linux/fs/fatx/misc.c
  *
  *  Written 1992,1993 by Werner Almesberger
- *  22/11/2000 - Fixed fat_date_unix2dos for dates earlier than 01/01/1980
+ *  22/11/2000 - Fixed fatx_date_unix2dos for dates earlier than 01/01/1980
  *		 and date_dos2unix for date==0 by Igor Zhbanov(bsg@uniyar.ac.ru)
  */
 
@@ -13,16 +13,16 @@
 #include "fatx.h"
 
 /*
- * fat_fs_error reports a file system problem that might indicate fa data
+ * fatx_fs_error reports a file system problem that might indicate fa data
  * corruption/inconsistency. Depending on 'errors' mount option the
- * panic() is called, or error message is printed FAT and nothing is done,
+ * panic() is called, or error message is printed FATX and nothing is done,
  * or filesystem is remounted read-only (default behavior).
  * In case the file system is remounted read-only, it can be made writable
  * again by remounting it.
  */
-void __fat_fs_error(struct super_block *sb, int report, const char *fmt, ...)
+void __fatx_fs_error(struct super_block *sb, int report, const char *fmt, ...)
 {
-	struct fat_mount_options *opts = &MSDOS_SB(sb)->options;
+	struct fatx_mount_options *opts = &FATX_SB(sb)->options;
 	va_list args;
 	struct va_format vaf;
 
@@ -30,25 +30,25 @@ void __fat_fs_error(struct super_block *sb, int report, const char *fmt, ...)
 		va_start(args, fmt);
 		vaf.fmt = fmt;
 		vaf.va = &args;
-		printk(KERN_ERR "FAT-fs (%s): error, %pV\n", sb->s_id, &vaf);
+		printk(KERN_ERR "FATX-fs (%s): error, %pV\n", sb->s_id, &vaf);
 		va_end(args);
 	}
 
-	if (opts->errors == FAT_ERRORS_PANIC)
-		panic("FAT-fs (%s): fs panic from previous error\n", sb->s_id);
-	else if (opts->errors == FAT_ERRORS_RO && !(sb->s_flags & MS_RDONLY)) {
+	if (opts->errors == FATX_ERRORS_PANIC)
+		panic("FATX-fs (%s): fs panic from previous error\n", sb->s_id);
+	else if (opts->errors == FATX_ERRORS_RO && !(sb->s_flags & MS_RDONLY)) {
 		sb->s_flags |= MS_RDONLY;
-		printk(KERN_ERR "FAT-fs (%s): Filesystem has been "
+		printk(KERN_ERR "FATX-fs (%s): Filesystem has been "
 				"set read-only\n", sb->s_id);
 	}
 }
-EXPORT_SYMBOL_GPL(__fat_fs_error);
+EXPORT_SYMBOL_GPL(__fatx_fs_error);
 
 /**
- * fat_msg() - print preformated FAT specific messages. Every thing what is
- * not fat_fs_error() should be fat_msg().
+ * fatx_msg() - print preformated FATX specific messages. Every thing what is
+ * not fatx_fs_error() should be fatx_msg().
  */
-void fat_msg(struct super_block *sb, const char *level, const char *fmt, ...)
+void fatx_msg(struct super_block *sb, const char *level, const char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list args;
@@ -56,31 +56,31 @@ void fat_msg(struct super_block *sb, const char *level, const char *fmt, ...)
 	va_start(args, fmt);
 	vaf.fmt = fmt;
 	vaf.va = &args;
-	printk("%sFAT-fs (%s): %pV\n", level, sb->s_id, &vaf);
+	printk("%sFATX-fs (%s): %pV\n", level, sb->s_id, &vaf);
 	va_end(args);
 }
 
-/* Flushes the number of free clusters on FAT32 */
+/* Flushes the number of free clusters on FATX32 */
 /* XXX: Need to write one per FSINFO block.  Currently only writes 1 */
-int fat_clusters_flush(struct super_block *sb)
+int fatx_clusters_flush(struct super_block *sb)
 {
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	struct buffer_head *bh;
-	struct fat_boot_fsinfo *fsinfo;
+	struct fatx_boot_fsinfo *fsinfo;
 
-	if (sbi->fat_bits != 32)
+	if (sbi->fatx_bits != 32)
 		return 0;
 
 	bh = sb_bread(sb, sbi->fsinfo_sector);
 	if (bh == NULL) {
-		fat_msg(sb, KERN_ERR, "bread failed in fat_clusters_flush");
+		fatx_msg(sb, KERN_ERR, "bread failed in fatx_clusters_flush");
 		return -EIO;
 	}
 
-	fsinfo = (struct fat_boot_fsinfo *)bh->b_data;
+	fsinfo = (struct fatx_boot_fsinfo *)bh->b_data;
 	/* Sanity check */
 	if (!IS_FSINFO(fsinfo)) {
-		fat_msg(sb, KERN_ERR, "Invalid FSINFO signature: "
+		fatx_msg(sb, KERN_ERR, "Invalid FSINFO signature: "
 		       "0x%08x, 0x%08x (sector = %lu)",
 		       le32_to_cpu(fsinfo->signature1),
 		       le32_to_cpu(fsinfo->signature2),
@@ -98,24 +98,24 @@ int fat_clusters_flush(struct super_block *sb)
 }
 
 /*
- * fat_chain_add() adds a new cluster to the chain of clusters represented
+ * fatx_chain_add() adds a new cluster to the chain of clusters represented
  * by inode.
  */
-int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
+int fatx_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 {
 	struct super_block *sb = inode->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct fatx_sb_info *sbi = FATX_SB(sb);
 	int ret, new_fclus, last;
 
 	/*
 	 * We must locate the last cluster of the file to add this new
-	 * one (new_dclus) to the end of the link list (the FAT).
+	 * one (new_dclus) to the end of the link list (the FATX).
 	 */
 	last = new_fclus = 0;
-	if (MSDOS_I(inode)->i_start) {
+	if (FATX_I(inode)->i_start) {
 		int fclus, dclus;
 
-		ret = fat_get_cluster(inode, FAT_ENT_EOF, &fclus, &dclus);
+		ret = fatx_get_cluster(inode, FATX_ENT_EOF, &fclus, &dclus);
 		if (ret < 0)
 			return ret;
 		new_fclus = fclus + 1;
@@ -124,41 +124,41 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 
 	/* add new one to the last of the cluster chain */
 	if (last) {
-		struct fat_entry fatent;
+		struct fatx_entry fatxent;
 
-		fatent_init(&fatent);
-		ret = fat_ent_read(inode, &fatent, last);
+		fatxent_init(&fatxent);
+		ret = fatx_ent_read(inode, &fatxent, last);
 		if (ret >= 0) {
 			int wait = inode_needs_sync(inode);
-			ret = fat_ent_write(inode, &fatent, new_dclus, wait);
-			fatent_brelse(&fatent);
+			ret = fatx_ent_write(inode, &fatxent, new_dclus, wait);
+			fatxent_brelse(&fatxent);
 		}
 		if (ret < 0)
 			return ret;
 		/*
-		 * FIXME:Although we can add this cache, fat_cache_add() is
-		 * assuming to be called after linear search with fat_cache_id.
+		 * FIXME:Although we can add this cache, fatx_cache_add() is
+		 * assuming to be called after linear search with fatx_cache_id.
 		 */
-//		fat_cache_add(inode, new_fclus, new_dclus);
+//		fatx_cache_add(inode, new_fclus, new_dclus);
 	} else {
-		MSDOS_I(inode)->i_start = new_dclus;
-		MSDOS_I(inode)->i_logstart = new_dclus;
+		FATX_I(inode)->i_start = new_dclus;
+		FATX_I(inode)->i_logstart = new_dclus;
 		/*
 		 * Since generic_write_sync() synchronizes regular files later,
 		 * we sync here only directories.
 		 */
 		if (S_ISDIR(inode->i_mode) && IS_DIRSYNC(inode)) {
-			ret = fat_sync_inode(inode);
+			ret = fatx_sync_inode(inode);
 			if (ret)
 				return ret;
 		} else
 			mark_inode_dirty(inode);
 	}
 	if (new_fclus != (inode->i_blocks >> (sbi->cluster_bits - 9))) {
-		fat_fs_error(sb, "clusters badly computed (%d != %llu)",
+		fatx_fs_error(sb, "clusters badly computed (%d != %llu)",
 			     new_fclus,
 			     (llu)(inode->i_blocks >> (sbi->cluster_bits - 9)));
-		fat_cache_inval_inode(inode);
+		fatx_cache_inval_inode(inode);
 	}
 	inode->i_blocks += nr_cluster << (sbi->cluster_bits - 9);
 
@@ -168,7 +168,7 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 extern struct timezone sys_tz;
 
 /*
- * The epoch of FAT timestamp is 1980.
+ * The epoch of FATX timestamp is 1980.
  *     :  bits :     value
  * date:  0 -  4: day	(1 -  31)
  * date:  5 -  8: month	(1 -  12)
@@ -192,8 +192,8 @@ static time_t days_in_year[] = {
 	0,   0,  31,  59,  90, 120, 151, 181, 212, 243, 273, 304, 334, 0, 0, 0,
 };
 
-/* Convert a FAT time/date pair to a UNIX date (seconds since 1 1 70). */
-void fat_time_fat2unix(struct msdos_sb_info *sbi, struct timespec *ts,
+/* Convert a FATX time/date pair to a UNIX date (seconds since 1 1 70). */
+void fatx_time_fat2unix(struct fatx_sb_info *sbi, struct timespec *ts,
 		       __le16 __time, __le16 __date, u8 time_cs)
 {
 	u16 time = le16_to_cpu(__time), date = le16_to_cpu(__date);
@@ -230,8 +230,8 @@ void fat_time_fat2unix(struct msdos_sb_info *sbi, struct timespec *ts,
 	}
 }
 
-/* Convert linear UNIX date to a FAT time/date pair. */
-void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
+/* Convert linear UNIX date to a FATX time/date pair. */
+void fatx_time_unix2fat(struct fatx_sb_info *sbi, struct timespec *ts,
 		       __le16 *time, __le16 *date, u8 *time_cs)
 {
 	struct tm tm;
@@ -239,7 +239,7 @@ void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
 		   (sbi->options.tz_set ? sbi->options.time_offset :
 		   -sys_tz.tz_minuteswest) * SECS_PER_MIN, &tm);
 
-	/*  FAT can only support year between 1980 to 2107 */
+	/*  FATX can only support year between 1980 to 2107 */
 	if (tm.tm_year < 1980 - 1900) {
 		*time = 0;
 		*date = cpu_to_le16((0 << 9) | (1 << 5) | 1);
@@ -267,9 +267,9 @@ void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
 	if (time_cs)
 		*time_cs = (ts->tv_sec & 1) * 100 + ts->tv_nsec / 10000000;
 }
-EXPORT_SYMBOL_GPL(fat_time_unix2fat);
+EXPORT_SYMBOL_GPL(fatx_time_unix2fat);
 
-int fat_sync_bhs(struct buffer_head **bhs, int nr_bhs)
+int fatx_sync_bhs(struct buffer_head **bhs, int nr_bhs)
 {
 	int i, err = 0;
 

@@ -19,14 +19,14 @@
 #define VFAT_SFN_CREATE_WIN95	0x0100 /* emulate win95 rule for create */
 #define VFAT_SFN_CREATE_WINNT	0x0200 /* emulate winnt rule for create */
 
-#define FAT_ERRORS_CONT		1      /* ignore error and continue */
-#define FAT_ERRORS_PANIC	2      /* panic on error */
-#define FAT_ERRORS_RO		3      /* remount r/o on error */
+#define FATX_ERRORS_CONT		1      /* ignore error and continue */
+#define FATX_ERRORS_PANIC	2      /* panic on error */
+#define FATX_ERRORS_RO		3      /* remount r/o on error */
 
-#define FAT_NFS_STALE_RW	1      /* NFS RW support, can cause ESTALE */
-#define FAT_NFS_NOSTALE_RO	2      /* NFS RO support, no ESTALE issue */
+#define FATX_NFS_STALE_RW	1      /* NFS RW support, can cause ESTALE */
+#define FATX_NFS_NOSTALE_RO	2      /* NFS RO support, no ESTALE issue */
 
-struct fat_mount_options {
+struct fatx_mount_options {
 	kuid_t fs_uid;
 	kgid_t fs_gid;
 	unsigned short fs_fmask;
@@ -49,70 +49,70 @@ struct fat_mount_options {
 		 numtail:1,        /* Does first alias have a numeric '~1' type tail? */
 		 flush:1,	   /* write things quickly */
 		 nocase:1,	   /* Does this need case conversion? 0=need case conversion*/
-		 usefree:1,	   /* Use free_clusters for FAT32 */
+		 usefree:1,	   /* Use free_clusters for FATX32 */
 		 tz_set:1,	   /* Filesystem timestamps' offset set */
 		 rodir:1,	   /* allow ATTR_RO for directory */
 		 discard:1;	   /* Issue discard requests on deletions */
 };
 
-#define FAT_HASH_BITS	8
-#define FAT_HASH_SIZE	(1UL << FAT_HASH_BITS)
+#define FATX_HASH_BITS	8
+#define FATX_HASH_SIZE	(1UL << FATX_HASH_BITS)
 
 /*
  * MS-DOS file system in-core superblock data
  */
-struct msdos_sb_info {
+struct fatx_sb_info {
 	unsigned short sec_per_clus;  /* sectors/cluster */
 	unsigned short cluster_bits;  /* log2(cluster_size) */
 	unsigned int cluster_size;    /* cluster size */
-	unsigned char fats, fat_bits; /* number of FATs, FAT bits (12 or 16) */
-	unsigned short fat_start;
-	unsigned long fat_length;     /* FAT start & length (sec.) */
+	unsigned char fatxs, fatx_bits; /* number of FATXs, FATX bits (12 or 16) */
+	unsigned short fatx_start;
+	unsigned long fatx_length;     /* FATX start & length (sec.) */
 	unsigned long dir_start;
 	unsigned short dir_entries;   /* root dir start & entries */
 	unsigned long data_start;     /* first data sector */
 	unsigned long max_cluster;    /* maximum cluster number */
 	unsigned long root_cluster;   /* first cluster of the root directory */
-	unsigned long fsinfo_sector;  /* sector number of FAT32 fsinfo */
-	struct mutex fat_lock;
+	unsigned long fsinfo_sector;  /* sector number of FATX32 fsinfo */
+	struct mutex fatx_lock;
 	struct mutex nfs_build_inode_lock;
 	struct mutex s_lock;
 	unsigned int prev_free;      /* previously allocated cluster number */
 	unsigned int free_clusters;  /* -1 if undefined */
 	unsigned int free_clus_valid; /* is free_clusters valid? */
-	struct fat_mount_options options;
+	struct fatx_mount_options options;
 	struct nls_table *nls_disk;   /* Codepage used on disk */
 	struct nls_table *nls_io;     /* Charset used for input and display */
 	const void *dir_ops;	      /* Opaque; default directory operations */
 	int dir_per_block;	      /* dir entries per block */
 	int dir_per_block_bits;	      /* log2(dir_per_block) */
 
-	int fatent_shift;
-	struct fatent_operations *fatent_ops;
-	struct inode *fat_inode;
+	int fatxent_shift;
+	struct fatxent_operations *fatxent_ops;
+	struct inode *fatx_inode;
 	struct inode *fsinfo_inode;
 
 	struct ratelimit_state ratelimit;
 
 	spinlock_t inode_hash_lock;
-	struct hlist_head inode_hashtable[FAT_HASH_SIZE];
+	struct hlist_head inode_hashtable[FATX_HASH_SIZE];
 
 	spinlock_t dir_hash_lock;
-	struct hlist_head dir_hashtable[FAT_HASH_SIZE];
+	struct hlist_head dir_hashtable[FATX_HASH_SIZE];
 
 	unsigned int dirty;           /* fs state before mount */
 };
 
-#define FAT_CACHE_VALID	0	/* special case for valid cache */
+#define FATX_CACHE_VALID	0	/* special case for valid cache */
 
 /*
  * MS-DOS file system inode data in memory
  */
-struct msdos_inode_info {
+struct fatx_inode_info {
 	spinlock_t cache_lru_lock;
 	struct list_head cache_lru;
 	int nr_caches;
-	/* for avoiding the race between fat_free() and fat_get_cluster() */
+	/* for avoiding the race between fatx_free() and fatx_get_cluster() */
 	unsigned int cache_valid_id;
 
 	/* NOTE: mmu_private is 64bits, so must hold ->i_mutex to access */
@@ -122,28 +122,28 @@ struct msdos_inode_info {
 	int i_logstart;		/* logical first cluster */
 	int i_attrs;		/* unused attribute bits */
 	loff_t i_pos;		/* on-disk position of directory entry or 0 */
-	struct hlist_node i_fat_hash;	/* hash by i_location */
+	struct hlist_node i_fatx_hash;	/* hash by i_location */
 	struct hlist_node i_dir_hash;	/* hash by i_logstart */
 	struct rw_semaphore truncate_lock; /* protect bmap against truncate */
 	struct inode vfs_inode;
 };
 
-struct fat_slot_info {
+struct fatx_slot_info {
 	loff_t i_pos;		/* on-disk position of directory entry */
 	loff_t slot_off;	/* offset for slot or de start */
 	int nr_slots;		/* number of slots + 1(de) in filename */
-	struct msdos_dir_entry *de;
+	struct fatx_dir_entry *de;
 	struct buffer_head *bh;
 };
 
-static inline struct msdos_sb_info *MSDOS_SB(struct super_block *sb)
+static inline struct fatx_sb_info *FATX_SB(struct super_block *sb)
 {
 	return sb->s_fs_info;
 }
 
-static inline struct msdos_inode_info *MSDOS_I(struct inode *inode)
+static inline struct fatx_inode_info *FATX_I(struct inode *inode)
 {
-	return container_of(inode, struct msdos_inode_info, vfs_inode);
+	return container_of(inode, struct fatx_inode_info, vfs_inode);
 }
 
 /*
@@ -153,9 +153,9 @@ static inline struct msdos_inode_info *MSDOS_I(struct inode *inode)
  * If it's directory and !sbi->options.rodir, ATTR_RO isn't read-only
  * bit, it's just used as flag for app.
  */
-static inline int fat_mode_can_hold_ro(struct inode *inode)
+static inline int fatx_mode_can_hold_ro(struct inode *inode)
 {
-	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
+	struct fatx_sb_info *sbi = FATX_SB(inode->i_sb);
 	umode_t mask;
 
 	if (S_ISDIR(inode->i_mode)) {
@@ -171,7 +171,7 @@ static inline int fat_mode_can_hold_ro(struct inode *inode)
 }
 
 /* Convert attribute bits and a mask to the UNIX mode. */
-static inline umode_t fat_make_mode(struct msdos_sb_info *sbi,
+static inline umode_t fatx_make_mode(struct fatx_sb_info *sbi,
 				   u8 attrs, umode_t mode)
 {
 	if (attrs & ATTR_RO && !((attrs & ATTR_DIR) && !sbi->options.rodir))
@@ -183,26 +183,26 @@ static inline umode_t fat_make_mode(struct msdos_sb_info *sbi,
 		return (mode & ~sbi->options.fs_fmask) | S_IFREG;
 }
 
-/* Return the FAT attribute byte for this inode */
-static inline u8 fat_make_attrs(struct inode *inode)
+/* Return the FATX attribute byte for this inode */
+static inline u8 fatx_make_attrs(struct inode *inode)
 {
-	u8 attrs = MSDOS_I(inode)->i_attrs;
+	u8 attrs = FATX_I(inode)->i_attrs;
 	if (S_ISDIR(inode->i_mode))
 		attrs |= ATTR_DIR;
-	if (fat_mode_can_hold_ro(inode) && !(inode->i_mode & S_IWUGO))
+	if (fatx_mode_can_hold_ro(inode) && !(inode->i_mode & S_IWUGO))
 		attrs |= ATTR_RO;
 	return attrs;
 }
 
-static inline void fat_save_attrs(struct inode *inode, u8 attrs)
+static inline void fatx_save_attrs(struct inode *inode, u8 attrs)
 {
-	if (fat_mode_can_hold_ro(inode))
-		MSDOS_I(inode)->i_attrs = attrs & ATTR_UNUSED;
+	if (fatx_mode_can_hold_ro(inode))
+		FATX_I(inode)->i_attrs = attrs & ATTR_UNUSED;
 	else
-		MSDOS_I(inode)->i_attrs = attrs & (ATTR_UNUSED | ATTR_RO);
+		FATX_I(inode)->i_attrs = attrs & (ATTR_UNUSED | ATTR_RO);
 }
 
-static inline unsigned char fat_checksum(const __u8 *name)
+static inline unsigned char fatx_checksum(const __u8 *name)
 {
 	unsigned char s = name[0];
 	s = (s<<7) + (s>>1) + name[1];	s = (s<<7) + (s>>1) + name[2];
@@ -213,34 +213,34 @@ static inline unsigned char fat_checksum(const __u8 *name)
 	return s;
 }
 
-static inline sector_t fat_clus_to_blknr(struct msdos_sb_info *sbi, int clus)
+static inline sector_t fatx_clus_to_blknr(struct fatx_sb_info *sbi, int clus)
 {
-	return ((sector_t)clus - FAT_START_ENT) * sbi->sec_per_clus
+	return ((sector_t)clus - FATX_START_ENT) * sbi->sec_per_clus
 		+ sbi->data_start;
 }
 
-static inline void fat_get_blknr_offset(struct msdos_sb_info *sbi,
+static inline void fatx_get_blknr_offset(struct fatx_sb_info *sbi,
 				loff_t i_pos, sector_t *blknr, int *offset)
 {
 	*blknr = i_pos >> sbi->dir_per_block_bits;
 	*offset = i_pos & (sbi->dir_per_block - 1);
 }
 
-static inline loff_t fat_i_pos_read(struct msdos_sb_info *sbi,
+static inline loff_t fatx_i_pos_read(struct fatx_sb_info *sbi,
 					struct inode *inode)
 {
 	loff_t i_pos;
 #if BITS_PER_LONG == 32
 	spin_lock(&sbi->inode_hash_lock);
 #endif
-	i_pos = MSDOS_I(inode)->i_pos;
+	i_pos = FATX_I(inode)->i_pos;
 #if BITS_PER_LONG == 32
 	spin_unlock(&sbi->inode_hash_lock);
 #endif
 	return i_pos;
 }
 
-static inline void fat16_towchar(wchar_t *dst, const __u8 *src, size_t len)
+static inline void fatx16_towchar(wchar_t *dst, const __u8 *src, size_t len)
 {
 #ifdef __BIG_ENDIAN
 	while (len--) {
@@ -252,22 +252,22 @@ static inline void fat16_towchar(wchar_t *dst, const __u8 *src, size_t len)
 #endif
 }
 
-static inline int fat_get_start(const struct msdos_sb_info *sbi,
-				const struct msdos_dir_entry *de)
+static inline int fatx_get_start(const struct fatx_sb_info *sbi,
+				const struct fatx_dir_entry *de)
 {
 	int cluster = le16_to_cpu(de->start);
-	if (sbi->fat_bits == 32)
+	if (sbi->fatx_bits == 32)
 		cluster |= (le16_to_cpu(de->starthi) << 16);
 	return cluster;
 }
 
-static inline void fat_set_start(struct msdos_dir_entry *de, int cluster)
+static inline void fatx_set_start(struct fatx_dir_entry *de, int cluster)
 {
 	de->start   = cpu_to_le16(cluster);
 	de->starthi = cpu_to_le16(cluster >> 16);
 }
 
-static inline void fatwchar_to16(__u8 *dst, const wchar_t *src, size_t len)
+static inline void fatxwchar_to16(__u8 *dst, const wchar_t *src, size_t len)
 {
 #ifdef __BIG_ENDIAN
 	while (len--) {
@@ -281,32 +281,32 @@ static inline void fatwchar_to16(__u8 *dst, const wchar_t *src, size_t len)
 #endif
 }
 
-/* fat/cache.c */
-extern void fat_cache_inval_inode(struct inode *inode);
-extern int fat_get_cluster(struct inode *inode, int cluster,
+/* fatx/cache.c */
+extern void fatx_cache_inval_inode(struct inode *inode);
+extern int fatx_get_cluster(struct inode *inode, int cluster,
 			   int *fclus, int *dclus);
-extern int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys,
+extern int fatx_bmap(struct inode *inode, sector_t sector, sector_t *phys,
 		    unsigned long *mapped_blocks, int create);
 
-/* fat/dir.c */
-extern const struct file_operations fat_dir_operations;
-extern int fat_search_long(struct inode *inode, const unsigned char *name,
-			   int name_len, struct fat_slot_info *sinfo);
-extern int fat_dir_empty(struct inode *dir);
-extern int fat_subdirs(struct inode *dir);
-extern int fat_scan(struct inode *dir, const unsigned char *name,
-		    struct fat_slot_info *sinfo);
-extern int fat_scan_logstart(struct inode *dir, int i_logstart,
-			     struct fat_slot_info *sinfo);
-extern int fat_get_dotdot_entry(struct inode *dir, struct buffer_head **bh,
-				struct msdos_dir_entry **de);
-extern int fat_alloc_new_dir(struct inode *dir, struct timespec *ts);
-extern int fat_add_entries(struct inode *dir, void *slots, int nr_slots,
-			   struct fat_slot_info *sinfo);
-extern int fat_remove_entries(struct inode *dir, struct fat_slot_info *sinfo);
+/* fatx/dir.c */
+extern const struct file_operations fatx_dir_operations;
+extern int fatx_search_long(struct inode *inode, const unsigned char *name,
+			   int name_len, struct fatx_slot_info *sinfo);
+extern int fatx_dir_empty(struct inode *dir);
+extern int fatx_subdirs(struct inode *dir);
+extern int fatx_scan(struct inode *dir, const unsigned char *name,
+		    struct fatx_slot_info *sinfo);
+extern int fatx_scan_logstart(struct inode *dir, int i_logstart,
+			     struct fatx_slot_info *sinfo);
+extern int fatx_get_dotdot_entry(struct inode *dir, struct buffer_head **bh,
+				struct fatx_dir_entry **de);
+extern int fatx_alloc_new_dir(struct inode *dir, struct timespec *ts);
+extern int fatx_add_entries(struct inode *dir, void *slots, int nr_slots,
+			   struct fatx_slot_info *sinfo);
+extern int fatx_remove_entries(struct inode *dir, struct fatx_slot_info *sinfo);
 
-/* fat/fatent.c */
-struct fat_entry {
+/* fatx/fatxent.c */
+struct fatx_entry {
 	int entry;
 	union {
 		u8 *ent12_p[2];
@@ -315,103 +315,103 @@ struct fat_entry {
 	} u;
 	int nr_bhs;
 	struct buffer_head *bhs[2];
-	struct inode *fat_inode;
+	struct inode *fatx_inode;
 };
 
-static inline void fatent_init(struct fat_entry *fatent)
+static inline void fatxent_init(struct fatx_entry *fatxent)
 {
-	fatent->nr_bhs = 0;
-	fatent->entry = 0;
-	fatent->u.ent32_p = NULL;
-	fatent->bhs[0] = fatent->bhs[1] = NULL;
-	fatent->fat_inode = NULL;
+	fatxent->nr_bhs = 0;
+	fatxent->entry = 0;
+	fatxent->u.ent32_p = NULL;
+	fatxent->bhs[0] = fatxent->bhs[1] = NULL;
+	fatxent->fatx_inode = NULL;
 }
 
-static inline void fatent_set_entry(struct fat_entry *fatent, int entry)
+static inline void fatxent_set_entry(struct fatx_entry *fatxent, int entry)
 {
-	fatent->entry = entry;
-	fatent->u.ent32_p = NULL;
+	fatxent->entry = entry;
+	fatxent->u.ent32_p = NULL;
 }
 
-static inline void fatent_brelse(struct fat_entry *fatent)
+static inline void fatxent_brelse(struct fatx_entry *fatxent)
 {
 	int i;
-	fatent->u.ent32_p = NULL;
-	for (i = 0; i < fatent->nr_bhs; i++)
-		brelse(fatent->bhs[i]);
-	fatent->nr_bhs = 0;
-	fatent->bhs[0] = fatent->bhs[1] = NULL;
-	fatent->fat_inode = NULL;
+	fatxent->u.ent32_p = NULL;
+	for (i = 0; i < fatxent->nr_bhs; i++)
+		brelse(fatxent->bhs[i]);
+	fatxent->nr_bhs = 0;
+	fatxent->bhs[0] = fatxent->bhs[1] = NULL;
+	fatxent->fatx_inode = NULL;
 }
 
-extern void fat_ent_access_init(struct super_block *sb);
-extern int fat_ent_read(struct inode *inode, struct fat_entry *fatent,
+extern void fatx_ent_access_init(struct super_block *sb);
+extern int fatx_ent_read(struct inode *inode, struct fatx_entry *fatxent,
 			int entry);
-extern int fat_ent_write(struct inode *inode, struct fat_entry *fatent,
+extern int fatx_ent_write(struct inode *inode, struct fatx_entry *fatxent,
 			 int new, int wait);
-extern int fat_alloc_clusters(struct inode *inode, int *cluster,
+extern int fatx_alloc_clusters(struct inode *inode, int *cluster,
 			      int nr_cluster);
-extern int fat_free_clusters(struct inode *inode, int cluster);
-extern int fat_count_free_clusters(struct super_block *sb);
+extern int fatx_free_clusters(struct inode *inode, int cluster);
+extern int fatx_count_free_clusters(struct super_block *sb);
 
-/* fat/file.c */
-extern long fat_generic_ioctl(struct file *filp, unsigned int cmd,
+/* fatx/file.c */
+extern long fatx_generic_ioctl(struct file *filp, unsigned int cmd,
 			      unsigned long arg);
-extern const struct file_operations fat_file_operations;
-extern const struct inode_operations fat_file_inode_operations;
-extern int fat_setattr(struct dentry *dentry, struct iattr *attr);
-extern void fat_truncate_blocks(struct inode *inode, loff_t offset);
-extern int fat_getattr(struct vfsmount *mnt, struct dentry *dentry,
+extern const struct file_operations fatx_file_operations;
+extern const struct inode_operations fatx_file_inode_operations;
+extern int fatx_setattr(struct dentry *dentry, struct iattr *attr);
+extern void fatx_truncate_blocks(struct inode *inode, loff_t offset);
+extern int fatx_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		       struct kstat *stat);
-extern int fat_file_fsync(struct file *file, loff_t start, loff_t end,
+extern int fatx_file_fsync(struct file *file, loff_t start, loff_t end,
 			  int datasync);
 
-/* fat/inode.c */
-extern void fat_attach(struct inode *inode, loff_t i_pos);
-extern void fat_detach(struct inode *inode);
-extern struct inode *fat_iget(struct super_block *sb, loff_t i_pos);
-extern struct inode *fat_build_inode(struct super_block *sb,
-			struct msdos_dir_entry *de, loff_t i_pos);
-extern int fat_sync_inode(struct inode *inode);
-extern int fat_fill_super(struct super_block *sb, void *data, int silent,
+/* fatx/inode.c */
+extern void fatx_attach(struct inode *inode, loff_t i_pos);
+extern void fatx_detach(struct inode *inode);
+extern struct inode *fatx_iget(struct super_block *sb, loff_t i_pos);
+extern struct inode *fatx_build_inode(struct super_block *sb,
+			struct fatx_dir_entry *de, loff_t i_pos);
+extern int fatx_sync_inode(struct inode *inode);
+extern int fatx_fill_super(struct super_block *sb, void *data, int silent,
 			  int isvfat, void (*setup)(struct super_block *));
-extern int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de);
+extern int fatx_fill_inode(struct inode *inode, struct fatx_dir_entry *de);
 
-extern int fat_flush_inodes(struct super_block *sb, struct inode *i1,
+extern int fatx_flush_inodes(struct super_block *sb, struct inode *i1,
 			    struct inode *i2);
-static inline unsigned long fat_dir_hash(int logstart)
+static inline unsigned long fatx_dir_hash(int logstart)
 {
-	return hash_32(logstart, FAT_HASH_BITS);
+	return hash_32(logstart, FATX_HASH_BITS);
 }
 
-/* fat/misc.c */
+/* fatx/misc.c */
 extern __printf(3, 4) __cold
-void __fat_fs_error(struct super_block *sb, int report, const char *fmt, ...);
-#define fat_fs_error(sb, fmt, args...)		\
-	__fat_fs_error(sb, 1, fmt , ## args)
-#define fat_fs_error_ratelimit(sb, fmt, args...) \
-	__fat_fs_error(sb, __ratelimit(&MSDOS_SB(sb)->ratelimit), fmt , ## args)
+void __fatx_fs_error(struct super_block *sb, int report, const char *fmt, ...);
+#define fatx_fs_error(sb, fmt, args...)		\
+	__fatx_fs_error(sb, 1, fmt , ## args)
+#define fatx_fs_error_ratelimit(sb, fmt, args...) \
+	__fatx_fs_error(sb, __ratelimit(&FATX_SB(sb)->ratelimit), fmt , ## args)
 __printf(3, 4) __cold
-void fat_msg(struct super_block *sb, const char *level, const char *fmt, ...);
-#define fat_msg_ratelimit(sb, level, fmt, args...)	\
+void fatx_msg(struct super_block *sb, const char *level, const char *fmt, ...);
+#define fatx_msg_ratelimit(sb, level, fmt, args...)	\
 	do {	\
-			if (__ratelimit(&MSDOS_SB(sb)->ratelimit))	\
-				fat_msg(sb, level, fmt, ## args);	\
+			if (__ratelimit(&FATX_SB(sb)->ratelimit))	\
+				fatx_msg(sb, level, fmt, ## args);	\
 	 } while (0)
-extern int fat_clusters_flush(struct super_block *sb);
-extern int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster);
-extern void fat_time_fat2unix(struct msdos_sb_info *sbi, struct timespec *ts,
+extern int fatx_clusters_flush(struct super_block *sb);
+extern int fatx_chain_add(struct inode *inode, int new_dclus, int nr_cluster);
+extern void fatx_time_fat2unix(struct fatx_sb_info *sbi, struct timespec *ts,
 			      __le16 __time, __le16 __date, u8 time_cs);
-extern void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
+extern void fatx_time_unix2fat(struct fatx_sb_info *sbi, struct timespec *ts,
 			      __le16 *time, __le16 *date, u8 *time_cs);
-extern int fat_sync_bhs(struct buffer_head **bhs, int nr_bhs);
+extern int fatx_sync_bhs(struct buffer_head **bhs, int nr_bhs);
 
-int fat_cache_init(void);
-void fat_cache_destroy(void);
+int fatx_cache_init(void);
+void fatx_cache_destroy(void);
 
-/* fat/nfs.c */
-extern const struct export_operations fat_export_ops;
-extern const struct export_operations fat_export_ops_nostale;
+/* fatx/nfs.c */
+extern const struct export_operations fatx_export_ops;
+extern const struct export_operations fatx_export_ops_nostale;
 
 /* helper for printk */
 typedef unsigned long long	llu;
