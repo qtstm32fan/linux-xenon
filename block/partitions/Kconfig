@@ -241,6 +241,13 @@ config EFI_PARTITION
 	  Say Y here if you would like to use hard disks under Linux which
 	  were partitioned using EFI GPT.
 
+config XBOX_PARTITION
+	bool "Xbox Partition support (EXPERIMENTAL)" if PARTITION_ADVANCED
+	help
+	  Say Y here if you are running Linux on the Xbox / Xbox 360, or
+	  would like to access a hard disk partitioned for the Xbox / Xbox 360
+	  under a PC running Linux. Otherwise, say N.
+
 config SYSV68_PARTITION
 	bool "SYSV68 partition table support" if PARTITION_ADVANCED
 	default y if VME
