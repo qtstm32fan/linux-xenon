@@ -1,5 +1,5 @@
-#ifndef _FAT_H
-#define _FAT_H
+#ifndef _FATX_H
+#define _FATX_H
 
 #include <linux/buffer_head.h>
 #include <linux/string.h>
@@ -8,7 +8,7 @@
 #include <linux/hash.h>
 #include <linux/mutex.h>
 #include <linux/ratelimit.h>
-#include <linux/msdos_fs.h>
+#include "xbox_fs.h"
 
 /*
  * vfat shortname flags
@@ -416,4 +416,4 @@ extern const struct export_operations fat_export_ops_nostale;
 /* helper for printk */
 typedef unsigned long long	llu;
 
-#endif /* !_FAT_H */
+#endif /* !_FATX_H */

@@ -5,8 +5,8 @@
 
 #include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/msdos_fs.h>
 #include <linux/blkdev.h>
+#include "xbox_fs.h"
 #include "fatx.h"
 
 struct fatent_operations {
