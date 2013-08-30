@@ -1,0 +1,12 @@
+config FATX_FS
+	tristate "FATX (XBOX) fs support"
+	select NLS
+	help
+	  If you want to use the FATX file system, then you must say Y or M here
+	  to include FATX support. You will then be able to mount partitions or
+	  diskettes with FATX-based file systems and transparently access the
+	  files on them, i.e. XBOX files will look and behave just like all
+	  other Unix files.
+
+	  To compile this as a module, choose M here: the module will be called
+	  fatx.
