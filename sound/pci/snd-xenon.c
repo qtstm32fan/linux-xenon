@@ -105,7 +105,7 @@ static void cache_flush(void *addr, int size)
     __asm__ __volatile__ ("sync" ::: "memory");
 }
 
-static inline u32 bswap32(u32 t)
+static inline u32 __builtin_bswap32(u32 t)
 {
 	return ((t & 0xFF) << 24) | ((t & 0xFF00) << 8) | ((t & 0xFF0000) >> 8) | ((t & 0xFF000000) >> 24);
 }
@@ -117,10 +117,10 @@ void xenon_smc_send_message(unsigned char *msg)
 
 	while (!(readl(base + 0x84) & 4));
 	writel(4, base + 0x84);
-	writel(bswap32(*(u32 *)(msg + 0)), base + 0x80);
-	writel(bswap32(*(u32 *)(msg + 4)), base + 0x80);
-	writel(bswap32(*(u32 *)(msg + 8)), base + 0x80);
-	writel(bswap32(*(u32 *)(msg + 12)), base + 0x80);
+	writel(__builtin_bswap32(*(u32 *)(msg + 0)), base + 0x80);
+	writel(__builtin_bswap32(*(u32 *)(msg + 4)), base + 0x80);
+	writel(__builtin_bswap32(*(u32 *)(msg + 8)), base + 0x80);
+	writel(__builtin_bswap32(*(u32 *)(msg + 12)), base + 0x80);
 	writel(0, base + 0x84);
 	iounmap(base);
 }
@@ -320,12 +320,12 @@ static int snd_xenon_playback_prepare(struct snd_pcm_substream *substream)
 
 	for (i=0; i < 32; i++) {
 		device->descr_base_virt[i*2] =
-			bswap32(runtime->dma_addr + device->descr_bytes * i);
+			__builtin_bswap32(runtime->dma_addr + device->descr_bytes * i);
 		device->descr_base_virt[i*2 + 1] =
-			bswap32(0x80000000 | (device->descr_bytes - 1));
+			__builtin_bswap32(0x80000000 | (device->descr_bytes - 1));
 	}
 	device->descr_base_virt[31*2 + 1] =
-		bswap32(0x80000000 | (device->descr_bytes - 1 - device->gap));
+		__builtin_bswap32(0x80000000 | (device->descr_bytes - 1 - device->gap));
 	cache_flush(device->descr_base_virt, DESCRIPTOR_BUFFER_SIZE);
 
 	writel(device->descr_base_phys, chip->iobase_virt + 0x00 + dev_id * 0x10);
