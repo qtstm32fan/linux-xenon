@@ -394,7 +394,7 @@ $(obj)/vmlinux.strip: vmlinux
 	$(STRIP) -s -R .comment $< -o $@
 
 $(obj)/zImage.xenon: $(obj)/vmlinux.strip
-	$(OBJCOPY) -O elf32-powerpc $< $@
+	@$(OBJCOPY) -O elf32-powerpc $< $@
 	@test -e /mnt/e/Misc/tftpd64 && \
 	   cp -f $@ /mnt/e/Misc/tftpd64/vmlinux || true
 
