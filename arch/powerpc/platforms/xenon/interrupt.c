@@ -10,6 +10,7 @@
 
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/irqnr.h>
 #include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/types.h>
@@ -131,39 +132,38 @@ static struct irq_chip xenon_pic = {
 	.irq_eoi = iic_eoi,
 };
 
-// struct irq_desc irq_desc[XENON_NR_IRQS];
-
 /* Get an IRQ number from the pending state register of the IIC */
-static unsigned int iic_get_irq(void)
-{
-	int cpu = hard_smp_processor_id();
-	void *my_iic_base;
-	int index;
+static unsigned int iic_get_irq(void) {
+  int cpu = hard_smp_processor_id();
+  struct irq_desc *desc;
+  void *my_iic_base;
+  int index;
 
-	my_iic_base = iic_base + cpu * 0x1000;
+  my_iic_base = iic_base + cpu * 0x1000;
 
-	index = in_be64(my_iic_base + 0x50) & 0x7F; /* read destructive pending interrupt */
+  /* read destructive pending interrupt */
+  index = in_be64(my_iic_base + 0x50) & 0x7F;
 
-	out_be64(my_iic_base + 0x08, 0x7c); /* current task priority */
-	mb();
-	in_be64(my_iic_base + 0x8);
+  out_be64(my_iic_base + 0x08, 0x7c); /* current task priority */
+  mb();
+  in_be64(my_iic_base + 0x8);
 
-		/* HACK: we will handle some (otherwise unhandled) interrupts here
-		   to prevent them flooding. */
-	switch (index) {
-	case PRIO_GRAPHICS:
-		writel(0, graphics + 0xed0);
-		writel(0, graphics + 0x6540);
-		break;
-	case PRIO_IOC:
-		writel(0, biu + 0x4002c);
-		break;
-	case PRIO_CLOCK:
-		writel(0, bridge_base + 0x106C);
-		break;
-	default:
-		break;
-	}
+  /* HACK: we will handle some (otherwise unhandled) interrupts here
+     to prevent them flooding. */
+  switch (index) {
+    case PRIO_GRAPHICS:
+      writel(0, graphics + 0xed0);   // RBBM_INT_CNTL
+      writel(0, graphics + 0x6540);  // R500_DxMODE_INT_MASK
+      break;
+    case PRIO_IOC:
+      writel(0, biu + 0x4002c);
+      break;
+    case PRIO_CLOCK:
+      writel(0, bridge_base + 0x106C);
+      break;
+    default:
+      break;
+  }
 
 #if 0
 	/* should be handled */
@@ -177,18 +177,19 @@ static unsigned int iic_get_irq(void)
 		return index;
 #endif
 
-	/* HACK: we need to ACK unhandled interrupts here */
-	if (!irq_desc[index].action) {
-		printk(KERN_WARNING "IRQ 0x%02x unhandled, doing local EOI\n", index);
-		out_be64(my_iic_base + 0x60, 0);
-		iic_eoi(NULL);
-		return NO_IRQ;
-	}
+  /* HACK: we need to ACK unhandled interrupts here */
+  desc = irq_to_desc(index);
+  if (!desc || !desc->action) {
+    printk(KERN_WARNING "IRQ 0x%02x unhandled, doing local EOI\n", index);
+    out_be64(my_iic_base + 0x60, 0);
+    iic_eoi(NULL);
+    return NO_IRQ;
+  }
 
-	if (index == 0x7C)
-		return NO_IRQ;
-	else
-		return index;
+  if (index == 0x7C)
+    return NO_IRQ;
+  else
+    return index;
 }
 
 static int xenon_irq_host_map(struct irq_domain *h, unsigned int virq,
