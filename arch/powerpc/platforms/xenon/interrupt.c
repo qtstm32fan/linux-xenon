@@ -131,7 +131,7 @@ static struct irq_chip xenon_pic = {
 	.irq_eoi = iic_eoi,
 };
 
-struct irq_desc irq_desc[XENON_NR_IRQS];
+// struct irq_desc irq_desc[XENON_NR_IRQS];
 
 /* Get an IRQ number from the pending state register of the IIC */
 static unsigned int iic_get_irq(void)
