@@ -15,6 +15,14 @@
 #include <asm/machdep.h>
 #include "interrupt.h"
 
+#if defined(DEBUG)
+#define DBG udbg_printf
+#else
+#define DBG pr_debug
+#endif
+
+extern int boot_cpuid;
+
 static void __init smp_xenon_probe(void)
 {
 	xenon_request_IPIs();
@@ -22,24 +30,10 @@ static void __init smp_xenon_probe(void)
 
 static void smp_xenon_setup_cpu(int cpu)
 {
+	/* Boot CPU IRQs are already initialized at this point in
+	 * xenon_iic_init_IRQ */
 	if (cpu != boot_cpuid)
 		xenon_init_irq_on_cpu(cpu);
-}
-
-static int smp_xenon_kick_cpu(int nr)
-{
-	BUG_ON(nr < 0 || nr >= NR_CPUS);
-
-	pr_debug("smp_xenon_kick_cpu %d\n", nr);
-
-	/*
-	 * The processor is currently spinning, waiting for the
-	 * cpu_start field to become non-zero After we set cpu_start,
-	 * the processor will continue on to secondary_start
-	 */
-	paca_ptrs[nr]->cpu_start = 1;
-
-	return 0;
 }
 
 static int smp_xenon_cpu_bootable(unsigned int nr)
@@ -48,9 +42,8 @@ static int smp_xenon_cpu_bootable(unsigned int nr)
 	 * during boot if the user requests it.  Odd-numbered
 	 * cpus are assumed to be secondary threads.
 	 */
-	if (system_state < SYSTEM_RUNNING &&
-	    cpu_has_feature(CPU_FTR_SMT) &&
-	    !smt_enabled_at_boot && nr % 2 != 0)
+	if (system_state < SYSTEM_RUNNING && cpu_has_feature(CPU_FTR_SMT)
+	    && !smt_enabled_at_boot && nr % 2 != 0)
 		return 0;
 
 	return 1;
@@ -65,7 +58,8 @@ static void smp_xenon_message_pass(int target, int msg)
 	if (target < NR_CPUS) {
 		xenon_cause_IPI(target, msg);
 	} else {
-		for_each_online_cpu(i) {
+		for_each_online_cpu(i)
+		{
 			/*
 			if (target == MSG_ALL_BUT_SELF
 			    && i == smp_processor_id())
@@ -77,11 +71,11 @@ static void smp_xenon_message_pass(int target, int msg)
 }
 
 static struct smp_ops_t xenon_smp_ops = {
-	.probe		= smp_xenon_probe,
-	.message_pass	= smp_xenon_message_pass,
-	.kick_cpu	= smp_xenon_kick_cpu,
-	.setup_cpu	= smp_xenon_setup_cpu,
-	.cpu_bootable	= smp_xenon_cpu_bootable,
+	.probe = smp_xenon_probe,
+	.message_pass = smp_xenon_message_pass,
+	.kick_cpu = smp_generic_kick_cpu,
+	.setup_cpu = smp_xenon_setup_cpu,
+	.cpu_bootable = smp_xenon_cpu_bootable,
 };
 
 /* This is called very early */
