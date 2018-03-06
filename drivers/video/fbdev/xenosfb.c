@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/screen_info.h>
 #include <linux/slab.h>
@@ -161,6 +162,7 @@ static int __init xenonfb_probe(struct platform_device *dev) {
   unsigned int size_vmode;
   unsigned int size_remap;
   unsigned int size_total;
+  volatile int *gfx;
   xenosfb_par_t *par;
 
   info = framebuffer_alloc(sizeof(xenosfb_par_t), &dev->dev);
@@ -175,13 +177,13 @@ static int __init xenonfb_probe(struct platform_device *dev) {
   if (!par->graphics_base) {
     printk(KERN_ERR
            "xenonfb: abort, cannot ioremap graphics registers "
-           "0x%x @ 0x%lx\n",
+           "0x%x @ 0x%llx\n",
            0x10000, 0x200ec800000ULL);
     err = -EIO;
     goto err_release_fb;
   }
 
-  volatile int *gfx = par->graphics_base + 0x6000;
+  gfx = par->graphics_base + 0x6000;
 
   /* setup native resolution, i.e. disable scaling */
   int vxres = gfx[0x134 / 4];
@@ -364,7 +366,6 @@ err_fb_dealoc:
   fb_dealloc_cmap(&info->cmap);
 err_unmap:
   iounmap(info->screen_base);
-err_release_mem:
   release_mem_region(xenonfb_fix.smem_start, size_total);
 err_unmap_gfx:
   iounmap(par->graphics_base);
@@ -373,17 +374,20 @@ err_release_fb:
   return err;
 }
 
-static void __exit xenonfb_remove(struct platform_device *dev) {
-  struct fb_info *info = pci_get_drvdata(dev);
-  xenosfb_par *par = info->par;
+static int __exit xenonfb_remove(struct platform_device *dev) {
+  struct fb_info *info = platform_get_drvdata(dev);
 
   if (info) {
+    xenosfb_par_t *par = info->par;
+
     unregister_framebuffer(info);
     fb_dealloc_cmap(&info->cmap);
     iounmap(info->screen_base);
     release_mem_region(xenonfb_fix.smem_start, par->smem_len);
     framebuffer_release(info);
   }
+
+  return 0;
 }
 
 static struct platform_driver xenonfb_driver = {
@@ -399,7 +403,7 @@ static struct platform_device xenonfb_device = {
     .name = "xenonfb",
 };
 
-static int __init xenonfb_init(void) {
+static int __init xenosfb_init(void) {
   int ret;
 
   ret = platform_driver_register(&xenonfb_driver);
@@ -411,11 +415,11 @@ static int __init xenonfb_init(void) {
   return ret;
 }
 
-static void __exit xenonfb_exit() {
+static void __exit xenosfb_exit(void) {
   platform_device_unregister(&xenonfb_device);
   platform_driver_unregister(&xenonfb_driver);
 }
 
-module_init(xenonfb_init);
-module_exit(xenonfb_exit);
+module_init(xenosfb_init);
+module_exit(xenosfb_exit);
 MODULE_LICENSE("GPL");
