@@ -22,7 +22,7 @@
 #include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #define DRV_NAME	"xenon_ana"
 #define DRV_VERSION	"0.2"
