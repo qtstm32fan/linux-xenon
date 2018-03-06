@@ -186,10 +186,12 @@ static unsigned int iic_get_irq(void) {
     return NO_IRQ;
   }
 
-  if (index == 0x7C)
-    return NO_IRQ;
-  else
-    return index;
+  /* ??? What is this? */
+  if (index == 0x7C) {
+	  return NO_IRQ;
+  }
+
+  return index;
 }
 
 static int xenon_irq_host_map(struct irq_domain *h, unsigned int virq,
@@ -271,19 +273,15 @@ static int ipi_to_prio(int ipi)
 	case PPC_MSG_CALL_FUNCTION:
 		return PRIO_IPI_1;
 		break;
-	/*
-	case PPC_MSG_CALL_FUNC_SINGLE:
+	case PPC_MSG_RESCHEDULE:
 		return PRIO_IPI_2;
 		break;
-	*/
-	case PPC_MSG_RESCHEDULE:
+	case PPC_MSG_TICK_BROADCAST:
 		return PRIO_IPI_3;
 		break;
-	/*
-	case PPC_MSG_DEBUGGER_BREAK:
+	case PPC_MSG_NMI_IPI:
 		return PRIO_IPI_4;
 		break;
-	*/
 	default:
 		printk("unhandled ipi %d\n", ipi);
 		BUG();
@@ -296,7 +294,6 @@ void xenon_cause_IPI(int target, int msg)
 	int ipi_prio;
 
 	ipi_prio = ipi_to_prio(msg);
-
 	out_be64(iic_base + 0x10 + hard_smp_processor_id() * 0x1000, (0x10000<<target) | ipi_prio);
 }
 
@@ -322,21 +319,20 @@ static void xenon_request_ipi(int ipi, const char *name)
 	}
 
 	smp_request_message_ipi(virq, ipi);
+
 	/*
 	if (request_irq(prio, xenon_ipi_action, IRQF_DISABLED,
-			name, (void *)(long)ipi))
+			name, (void *)(long)ipi) != 0)
 		printk(KERN_ERR "request irq for ipi failed!\n");
-		*/
+	*/
 }
 
 void xenon_request_IPIs(void)
 {
 	xenon_request_ipi(PPC_MSG_CALL_FUNCTION, "IPI-call");
 	xenon_request_ipi(PPC_MSG_RESCHEDULE, "IPI-resched");
-	// xenon_request_ipi(PPC_MSG_CALL_FUNC_SINGLE, "IPI-call-single");
-#ifdef CONFIG_DEBUGGER
-	// xenon_request_ipi(PPC_MSG_DEBUGGER_BREAK, "IPI-debug");
-#endif /* CONFIG_DEBUGGER */
+	xenon_request_ipi(PPC_MSG_TICK_BROADCAST, "IPI-tick-broadcast");
+	xenon_request_ipi(PPC_MSG_NMI_IPI, "IPI-nmi-ipi");
 }
 
 #endif
