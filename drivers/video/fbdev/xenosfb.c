@@ -28,7 +28,7 @@
 
 /* --------------------------------------------------------------------- */
 
-static struct fb_var_screeninfo xenonfb_defined __initdata = {
+static struct fb_var_screeninfo xenosfb_defined __initdata = {
     .activate = FB_ACTIVATE_NOW,
     .height = -1,
     .width = -1,
@@ -39,7 +39,7 @@ static struct fb_var_screeninfo xenonfb_defined __initdata = {
     .vmode = FB_VMODE_NONINTERLACED,
 };
 
-static struct fb_fix_screeninfo xenonfb_fix __initdata = {
+static struct fb_fix_screeninfo xenosfb_fix __initdata = {
     .id = "XENON FB",
     .type = FB_TYPE_PACKED_PIXELS,
     .accel = FB_ACCEL_NONE,
@@ -77,7 +77,7 @@ typedef struct xenosfb_par {
 
 /* --------------------------------------------------------------------- */
 
-static int xenonfb_setcolreg(unsigned regno, unsigned red, unsigned green,
+static int xenosfb_setcolreg(unsigned regno, unsigned red, unsigned green,
                              unsigned blue, unsigned transp,
                              struct fb_info *info) {
   /*
@@ -144,9 +144,9 @@ void xenon_copyarea(struct fb_info *p, const struct fb_copyarea *area) {
   }
 }
 
-static struct fb_ops xenonfb_ops = {
+static struct fb_ops xenosfb_ops = {
     .owner = THIS_MODULE,
-    .fb_setcolreg = xenonfb_setcolreg,
+    .fb_setcolreg = xenosfb_setcolreg,
     .fb_fillrect = xenon_fillrect,
     .fb_copyarea = xenon_copyarea,
     .fb_imageblit = cfb_imageblit,
@@ -156,7 +156,7 @@ static struct fb_ops xenonfb_ops = {
 void udbg_shutdown_xenon(void);
 #endif
 
-static int __init xenonfb_probe(struct platform_device *dev) {
+static int __init xenosfb_probe(struct platform_device *dev) {
   struct fb_info *info;
   int err;
   unsigned int size_vmode;
@@ -176,7 +176,7 @@ static int __init xenonfb_probe(struct platform_device *dev) {
   par->ati_regs = par->graphics_base + 0x6100;
   if (!par->graphics_base) {
     printk(KERN_ERR
-           "xenonfb: abort, cannot ioremap graphics registers "
+           "xenosfb: abort, cannot ioremap graphics registers "
            "0x%x @ 0x%llx\n",
            0x10000, 0x200ec800000ULL);
     err = -EIO;
@@ -244,21 +244,21 @@ static int __init xenonfb_probe(struct platform_device *dev) {
   gfx[0x120 / 4] = screen_info.lfb_linelength /
                    8; /* fixup pitch, in case we switched resolution */
 
-  printk(KERN_INFO "xenonfb: detected %dx%d framebuffer @ 0x%08x\n",
+  printk(KERN_INFO "xenosfb: detected %dx%d framebuffer @ 0x%08x\n",
          screen_info.lfb_width, screen_info.lfb_height, screen_info.lfb_base);
 
-  xenonfb_fix.smem_start = screen_info.lfb_base;
-  xenonfb_defined.bits_per_pixel = screen_info.lfb_depth;
-  xenonfb_defined.xres = screen_info.lfb_width;
-  xenonfb_defined.yres = screen_info.lfb_height;
-  xenonfb_defined.xoffset = 0;
-  xenonfb_defined.yoffset = 0;
-  xenonfb_fix.line_length = screen_info.lfb_linelength;
+  xenosfb_fix.smem_start = screen_info.lfb_base;
+  xenosfb_defined.bits_per_pixel = screen_info.lfb_depth;
+  xenosfb_defined.xres = screen_info.lfb_width;
+  xenosfb_defined.yres = screen_info.lfb_height;
+  xenosfb_defined.xoffset = 0;
+  xenosfb_defined.yoffset = 0;
+  xenosfb_fix.line_length = screen_info.lfb_linelength;
 
   /*   size_vmode -- that is the amount of memory needed for the
    *                 used video mode, i.e. the minimum amount of
    *                 memory we need. */
-  size_vmode = xenonfb_defined.yres * xenonfb_fix.line_length;
+  size_vmode = xenosfb_defined.yres * xenosfb_fix.line_length;
 
   /*   size_total -- all video memory we have. Used for
    *                 entries, ressource allocation and bounds
@@ -267,88 +267,83 @@ static int __init xenonfb_probe(struct platform_device *dev) {
   if (size_total < size_vmode) size_total = size_vmode;
 
   /*   size_remap -- the amount of video memory we are going to
-   *                 use for xenonfb.  With modern cards it is no
+   *                 use for xenosfb.  With modern cards it is no
    *                 option to simply use size_total as that
    *                 wastes plenty of kernel address space. */
   size_remap = size_vmode * 2;
   if (size_remap < size_vmode) size_remap = size_vmode;
   if (size_remap > size_total) size_remap = size_total;
-  xenonfb_fix.smem_len = size_remap;
+  xenosfb_fix.smem_len = size_remap;
   par->smem_len = size_total;
 
-  if (!request_mem_region(xenonfb_fix.smem_start, size_total, "xenonfb")) {
-    printk(KERN_WARNING "xenonfb: cannot reserve video memory at 0x%lx\n",
-           xenonfb_fix.smem_start);
+  if (!request_mem_region(xenosfb_fix.smem_start, size_total, "xenosfb")) {
+    printk(KERN_WARNING "xenosfb: cannot reserve video memory at 0x%lx\n",
+           xenosfb_fix.smem_start);
     /* We cannot make this fatal. Sometimes this comes from magic
        spaces our resource handlers simply don't know about */
   }
 
-// Shut down the early framebuffer driver (if enabled).
-#ifdef CONFIG_PPC_EARLY_DEBUG_XENON
-  udbg_shutdown_xenon();
-#endif
-
-  info->screen_base = ioremap(xenonfb_fix.smem_start, xenonfb_fix.smem_len);
+  info->screen_base = ioremap(xenosfb_fix.smem_start, xenosfb_fix.smem_len);
   if (!info->screen_base) {
     printk(KERN_ERR
-           "xenonfb: abort, cannot ioremap video memory "
+           "xenosfb: abort, cannot ioremap video memory "
            "0x%x @ 0x%lx\n",
-           xenonfb_fix.smem_len, xenonfb_fix.smem_start);
+           xenosfb_fix.smem_len, xenosfb_fix.smem_start);
     err = -EIO;
     goto err_unmap_gfx;
   }
 
   printk(KERN_INFO
-         "xenonfb: framebuffer at 0x%lx, mapped to 0x%p, "
+         "xenosfb: framebuffer at 0x%lx, mapped to 0x%p, "
          "using %dk, total %dk\n",
-         xenonfb_fix.smem_start, info->screen_base, size_remap / 1024,
+         xenosfb_fix.smem_start, info->screen_base, size_remap / 1024,
          size_total / 1024);
-  printk(KERN_INFO "xenonfb: mode is %dx%dx%d, linelength=%d, pages=%d\n",
-         xenonfb_defined.xres, xenonfb_defined.yres,
-         xenonfb_defined.bits_per_pixel, xenonfb_fix.line_length,
+  printk(KERN_INFO "xenosfb: mode is %dx%dx%d, linelength=%d, pages=%d\n",
+         xenosfb_defined.xres, xenosfb_defined.yres,
+         xenosfb_defined.bits_per_pixel, xenosfb_fix.line_length,
          screen_info.pages);
 
-  xenonfb_defined.xres_virtual = xenonfb_defined.xres;
-  xenonfb_defined.yres_virtual = xenonfb_fix.smem_len / xenonfb_fix.line_length;
-  printk(KERN_INFO "xenonfb: scrolling: redraw\n");
-  xenonfb_defined.yres_virtual = xenonfb_defined.yres;
+  xenosfb_defined.xres_virtual = xenosfb_defined.xres;
+  xenosfb_defined.yres_virtual = xenosfb_fix.smem_len / xenosfb_fix.line_length;
+  printk(KERN_INFO "xenosfb: scrolling: redraw\n");
+  xenosfb_defined.yres_virtual = xenosfb_defined.yres;
 
   /* some dummy values for timing to make fbset happy */
-  xenonfb_defined.pixclock =
-      10000000 / xenonfb_defined.xres * 1000 / xenonfb_defined.yres;
-  xenonfb_defined.left_margin = (xenonfb_defined.xres / 8) & 0xf8;
-  xenonfb_defined.hsync_len = (xenonfb_defined.xres / 8) & 0xf8;
+  xenosfb_defined.pixclock =
+      10000000 / xenosfb_defined.xres * 1000 / xenosfb_defined.yres;
+  xenosfb_defined.left_margin = (xenosfb_defined.xres / 8) & 0xf8;
+  xenosfb_defined.hsync_len = (xenosfb_defined.xres / 8) & 0xf8;
 
-  printk(KERN_INFO "xenonfb: pixclk=%ld left=%02x hsync=%02x\n",
-         (unsigned long)xenonfb_defined.pixclock, xenonfb_defined.left_margin,
-         xenonfb_defined.hsync_len);
+  printk(KERN_INFO "xenosfb: pixclk=%ld left=%02x hsync=%02x\n",
+         (unsigned long)xenosfb_defined.pixclock, xenosfb_defined.left_margin,
+         xenosfb_defined.hsync_len);
 
-  xenonfb_defined.red.offset = screen_info.red_pos;
-  xenonfb_defined.red.length = screen_info.red_size;
-  xenonfb_defined.green.offset = screen_info.green_pos;
-  xenonfb_defined.green.length = screen_info.green_size;
-  xenonfb_defined.blue.offset = screen_info.blue_pos;
-  xenonfb_defined.blue.length = screen_info.blue_size;
-  xenonfb_defined.transp.offset = screen_info.rsvd_pos;
-  xenonfb_defined.transp.length = screen_info.rsvd_size;
+  xenosfb_defined.red.offset = screen_info.red_pos;
+  xenosfb_defined.red.length = screen_info.red_size;
+  xenosfb_defined.green.offset = screen_info.green_pos;
+  xenosfb_defined.green.length = screen_info.green_size;
+  xenosfb_defined.blue.offset = screen_info.blue_pos;
+  xenosfb_defined.blue.length = screen_info.blue_size;
+  xenosfb_defined.transp.offset = screen_info.rsvd_pos;
+  xenosfb_defined.transp.length = screen_info.rsvd_size;
 
   printk(KERN_INFO
-         "xenonfb: %s: "
+         "xenosfb: %s: "
          "size=%d:%d:%d:%d, shift=%d:%d:%d:%d\n",
          "Truecolor", screen_info.rsvd_size, screen_info.red_size,
          screen_info.green_size, screen_info.blue_size, screen_info.rsvd_pos,
          screen_info.red_pos, screen_info.green_pos, screen_info.blue_pos);
 
-  xenonfb_fix.ypanstep = 0;
-  xenonfb_fix.ywrapstep = 0;
+  xenosfb_fix.ypanstep = 0;
+  xenosfb_fix.ywrapstep = 0;
 
   /* request failure does not faze us, as vgacon probably has this
    * region already (FIXME) */
-  request_region(0x3c0, 32, "xenonfb");
+  request_region(0x3c0, 32, "xenosfb");
 
-  info->fbops = &xenonfb_ops;
-  info->var = xenonfb_defined;
-  info->fix = xenonfb_fix;
+  info->fbops = &xenosfb_ops;
+  info->var = xenosfb_defined;
+  info->fix = xenosfb_fix;
   info->flags = FBINFO_FLAG_DEFAULT;
 
   if (fb_alloc_cmap(&info->cmap, 256, 0) < 0) {
@@ -359,14 +354,21 @@ static int __init xenonfb_probe(struct platform_device *dev) {
     err = -EINVAL;
     goto err_fb_dealoc;
   }
-  printk(KERN_INFO "fb%d: %s frame buffer device\n", info->node, info->fix.id);
-  return 0;
+
+// Shut down the early framebuffer driver (if enabled).
+#ifdef CONFIG_PPC_EARLY_DEBUG_XENON
+	udbg_shutdown_xenon();
+#endif
+
+	printk(KERN_INFO "fb%d: %s frame buffer device\n", info->node,
+	       info->fix.id);
+	return 0;
 
 err_fb_dealoc:
   fb_dealloc_cmap(&info->cmap);
 err_unmap:
   iounmap(info->screen_base);
-  release_mem_region(xenonfb_fix.smem_start, size_total);
+  release_mem_region(xenosfb_fix.smem_start, size_total);
 err_unmap_gfx:
   iounmap(par->graphics_base);
 err_release_fb:
@@ -374,7 +376,7 @@ err_release_fb:
   return err;
 }
 
-static int __exit xenonfb_remove(struct platform_device *dev) {
+static int __exit xenosfb_remove(struct platform_device *dev) {
   struct fb_info *info = platform_get_drvdata(dev);
 
   if (info) {
@@ -383,41 +385,41 @@ static int __exit xenonfb_remove(struct platform_device *dev) {
     unregister_framebuffer(info);
     fb_dealloc_cmap(&info->cmap);
     iounmap(info->screen_base);
-    release_mem_region(xenonfb_fix.smem_start, par->smem_len);
+    release_mem_region(xenosfb_fix.smem_start, par->smem_len);
     framebuffer_release(info);
   }
 
   return 0;
 }
 
-static struct platform_driver xenonfb_driver = {
-    .probe = xenonfb_probe,
-    .remove = xenonfb_remove,
+static struct platform_driver xenosfb_driver = {
+    .probe = xenosfb_probe,
+    .remove = xenosfb_remove,
     .driver =
         {
-            .name = "xenonfb",
+            .name = "xenosfb",
         },
 };
 
-static struct platform_device xenonfb_device = {
-    .name = "xenonfb",
+static struct platform_device xenosfb_device = {
+    .name = "xenosfb",
 };
 
 static int __init xenosfb_init(void) {
   int ret;
 
-  ret = platform_driver_register(&xenonfb_driver);
+  ret = platform_driver_register(&xenosfb_driver);
 
   if (!ret) {
-    ret = platform_device_register(&xenonfb_device);
-    if (ret) platform_driver_unregister(&xenonfb_driver);
+    ret = platform_device_register(&xenosfb_device);
+    if (ret) platform_driver_unregister(&xenosfb_driver);
   }
   return ret;
 }
 
 static void __exit xenosfb_exit(void) {
-  platform_device_unregister(&xenonfb_device);
-  platform_driver_unregister(&xenonfb_driver);
+  platform_device_unregister(&xenosfb_device);
+  platform_driver_unregister(&xenosfb_driver);
 }
 
 module_init(xenosfb_init);
