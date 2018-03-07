@@ -130,10 +130,7 @@ static void __noreturn xenon_halt(void)
 
 static int __init xenon_probe(void)
 {
-	unsigned long root = of_get_flat_dt_root();
-
-	if (!of_flat_dt_is_compatible(root, "XENON")) {
-		printk(KERN_WARNING "DT is incompatible with XENON!");
+	if (!of_machine_is_compatible("XENON")) {
 		return 0;
 	}
 
