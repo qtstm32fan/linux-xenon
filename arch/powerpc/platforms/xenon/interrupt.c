@@ -26,10 +26,18 @@
 #include <asm/prom.h>
 #include <asm/ptrace.h>
 #include <asm/machdep.h>
+#include <asm/udbg.h>
 
 #include "interrupt.h"
 
-static void *iic_base,
+#define DEBUG
+#if defined(DEBUG)
+#define DBG udbg_printf
+#else
+#define DBG pr_debug
+#endif
+
+static void *iic_base, // 00050000
 	*bridge_base, // ea000000
 	*biu,         // e1000000
 	*graphics;    // ec800000
@@ -60,12 +68,27 @@ static struct irq_domain *host;
 #define PRIO_CLOCK       0x74
 #define PRIO_IPI_1       0x78
 
+/*
+ * Important interrupt registers (per CPU):
+ *
+ * 0x00: CPU_WHOAMI
+ * 0x08: CPU_CURRENT_TASK_PRI
+ * 0x10: CPU_IPI_DISPATCH_0
+ * 0x20: CPI_IPI_DISPATCH_2?
+ * 0x50: incoming interrupts
+ * 0x58: ???
+ * 0x60: interrupt ACK?
+ * 0x68: interrupt EOI?
+ * 0x70: interrupt MCACK? mask? max interrupt? always writing 0x7C
+ */
+
 /* bridge (PCI) IRQ -> CPU IRQ */
 static int xenon_pci_irq_map[] = {
-		PRIO_CLOCK, PRIO_SATA_CDROM, PRIO_SATA_HDD, PRIO_SMM,
-		PRIO_OHCI_0, PRIO_EHCI_0, PRIO_OHCI_1, PRIO_EHCI_1,
-		-1, -1, PRIO_ENET, PRIO_XMA,
-		PRIO_AUDIO, PRIO_SFCX, -1, -1};
+	PRIO_CLOCK,  PRIO_SATA_CDROM, PRIO_SATA_HDD, PRIO_SMM,  PRIO_OHCI_0,
+	PRIO_EHCI_0, PRIO_OHCI_1,     PRIO_EHCI_1,   -1,	-1,
+	PRIO_ENET,   PRIO_XMA,	PRIO_AUDIO,    PRIO_SFCX, -1,
+	-1,
+};
 
 static void disconnect_pci_irq(int prio)
 {
@@ -85,57 +108,65 @@ static void connect_pci_irq(int prio)
 
 	printk(KERN_WARNING "xenon IIC: connect irq 0x%.2X\n", prio);
 
-	for (i=0; i<0x10; ++i)
+	for (i = 0; i < 0x10; ++i)
 		if (xenon_pci_irq_map[i] == prio)
-			writel(0x0800180 | (xenon_pci_irq_map[i]/4), bridge_base + 0x10 + i * 4);
+			writel(0x0800180 | (xenon_pci_irq_map[i] / 4),
+			       bridge_base + 0x10 + i * 4);
 }
 
-static void iic_mask(struct irq_data *d)
+static void iic_ack(struct irq_data *data)
 {
-	disconnect_pci_irq(d->irq);
+	int cpu = hard_smp_processor_id();
+	out_be64(iic_base + cpu * 0x1000 + 0x60, 0); // ACK?
 }
 
-static void iic_unmask(struct irq_data *d)
+static void iic_mask(struct irq_data *data)
+{
+	disconnect_pci_irq(data->irq);
+}
+
+static void iic_unmask(struct irq_data *data)
 {
 	int i;
-	connect_pci_irq(d->irq);
-	for (i=0; i<6; ++i)
+	connect_pci_irq(data->irq);
+
+	/* ?? ACK on all CPUs */
+	for (i = 0; i < 6; ++i)
 		out_be64(iic_base + i * 0x1000 + 0x68, 0);
 }
 
-void xenon_init_irq_on_cpu(int cpu)
-{
-	printk(KERN_INFO "xenon IIC: init on cpu %i\n", cpu);
-		/* init that cpu's interrupt controller */
-	out_be64(iic_base + cpu * 0x1000 + 0x70, 0x7c);
-	out_be64(iic_base + cpu * 0x1000 + 0x8, 0);      /* irql */
-	out_be64(iic_base + cpu * 0x1000, 1<<cpu);       /* "who am i" */
-
-		/* ack all outstanding interrupts */
-	while (in_be64(iic_base + cpu * 0x1000 + 0x50) != 0x7C);
-	out_be64(iic_base + cpu * 0x1000 + 0x68, 0);
-}
-
-static void iic_eoi(struct irq_data *d)
+static void iic_eoi(struct irq_data *data)
 {
 	int cpu = hard_smp_processor_id();
-	void *my_iic_base = iic_base + cpu * 0x1000;
-	out_be64(my_iic_base + 0x68, 0);
+	out_be64(iic_base + cpu * 0x1000 + 0x68, 0); /* EOI ACK? */
 	mb();
-	in_be64(my_iic_base + 0x8);
+	in_be64(iic_base + cpu * 0x1000 + 0x08);
 }
 
 static struct irq_chip xenon_pic = {
 	.name = " XENON-PIC ",
+	.irq_ack = iic_ack,
 	.irq_mask = iic_mask,
 	.irq_unmask = iic_unmask,
 	.irq_eoi = iic_eoi,
 };
 
+void xenon_init_irq_on_cpu(int cpu)
+{
+	printk(KERN_INFO "xenon IIC: init on cpu %i\n", cpu);
+	/* init that cpu's interrupt controller */
+	out_be64(iic_base + cpu * 0x1000 + 0x70, 0x7c);
+	out_be64(iic_base + cpu * 0x1000 + 0x08, 0);  /* irql */
+	out_be64(iic_base + cpu * 0x1000, 1 << cpu); /* "who am i" */
+
+	/* read in and ack all outstanding interrupts */
+	while (in_be64(iic_base + cpu * 0x1000 + 0x50) != 0x7C);
+	out_be64(iic_base + cpu * 0x1000 + 0x68, 0);
+}
+
 /* Get an IRQ number from the pending state register of the IIC */
 static unsigned int iic_get_irq(void) {
   int cpu = hard_smp_processor_id();
-  struct irq_desc *desc;
   void *my_iic_base;
   int index;
 
@@ -146,7 +177,7 @@ static unsigned int iic_get_irq(void) {
 
   out_be64(my_iic_base + 0x08, 0x7c); /* current task priority */
   mb();
-  in_be64(my_iic_base + 0x8);
+  in_be64(my_iic_base + 0x08); /* irql */
 
   /* HACK: we will handle some (otherwise unhandled) interrupts here
      to prevent them flooding. */
@@ -176,15 +207,6 @@ static unsigned int iic_get_irq(void) {
 	if (index == PRIO_IPI_4)
 		return index;
 #endif
-
-  /* HACK: we need to ACK unhandled interrupts here */
-  desc = irq_to_desc(index);
-  if (!desc || !desc->action) {
-    printk(KERN_WARNING "IRQ 0x%02x unhandled, doing local EOI\n", index);
-    out_be64(my_iic_base + 0x60, 0);
-    iic_eoi(NULL);
-    return NO_IRQ;
-  }
 
   /* ??? What is this? */
   if (index == 0x7C) {
@@ -294,7 +316,8 @@ void xenon_cause_IPI(int target, int msg)
 	int ipi_prio;
 
 	ipi_prio = ipi_to_prio(msg);
-	out_be64(iic_base + 0x10 + hard_smp_processor_id() * 0x1000, (0x10000<<target) | ipi_prio);
+	out_be64(iic_base + 0x10 + hard_smp_processor_id() * 0x1000,
+		 (0x10000 << target) | ipi_prio);
 }
 
 /*
