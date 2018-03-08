@@ -51,7 +51,7 @@ static struct irq_domain *host;
 #define PRIO_SFCX        0x18
 #define PRIO_SATA_HDD    0x20
 #define PRIO_SATA_CDROM  0x24
-#define PRIO_OHCI_0      0x2c
+#define PRIO_OHCI_0      0x2C
 #define PRIO_EHCI_0      0x30
 #define PRIO_OHCI_1      0x34
 #define PRIO_EHCI_1      0x38
@@ -63,31 +63,68 @@ static struct irq_domain *host;
 #define PRIO_PROFILER    0x60
 #define PRIO_BIU         0x64
 #define PRIO_IOC         0x68
-#define PRIO_FSB         0x6c
+#define PRIO_FSB         0x6C
 #define PRIO_IPI_2       0x70
 #define PRIO_CLOCK       0x74
 #define PRIO_IPI_1       0x78
+#define PRIO_NONE		 0x7C
 
 /*
  * Important interrupt registers (per CPU):
  *
  * 0x00: CPU_WHOAMI
- * 0x08: CPU_CURRENT_TASK_PRI
+ * 0x08: CPU_CURRENT_TASK_PRI: only receive interrupts higher than this (read changes)
  * 0x10: CPU_IPI_DISPATCH_0
- * 0x20: CPI_IPI_DISPATCH_2?
- * 0x50: incoming interrupts
- * 0x58: ???
+ * 0x18: unused(?)
+ * 0x20: ? (read changes)
+ * 0x28: ? (read changes)
+ * 0x30: ? (read changes)
+ * 0x38: same value as 0x20(?) (read changes)
+ * 0x40: unused(?)
+ * 0x48: unused(?)
+ * 0x50: incoming interrupts (read changes)
+ * 0x58: duplicate of 0x50? (read changes)
  * 0x60: interrupt ACK?
- * 0x68: interrupt EOI?
+ * 0x68: interrupt EOI? select?
  * 0x70: interrupt MCACK? mask? max interrupt? always writing 0x7C
+ * 0xF0: ?
+ * 
  */
 
-/* bridge (PCI) IRQ -> CPU IRQ */
+/* CPU IRQ -> bridge (PCI) IRQ */
 static int xenon_pci_irq_map[] = {
-	PRIO_CLOCK,  PRIO_SATA_CDROM, PRIO_SATA_HDD, PRIO_SMM,  PRIO_OHCI_0,
-	PRIO_EHCI_0, PRIO_OHCI_1,     PRIO_EHCI_1,   -1,	-1,
-	PRIO_ENET,   PRIO_XMA,	PRIO_AUDIO,    PRIO_SFCX, -1,
-	-1,
+	/* 0x00             */ -1,
+	/* 0x04             */ -1,
+	/* PRIO_IPI_4       */ -1,
+	/* 0x0C             */ -1,
+	/* PRIO_IPI_3       */ -1,
+	/* PRIO_SMM         */ 3,
+	/* PRIO_SFCX        */ 13,
+	/* 0x1C             */ -1,
+	/* PRIO_SATA_HDD    */ 2,
+	/* PRIO_SATA_CDROM  */ 1,
+	/* 0x28             */ -1,
+	/* PRIO_OHCI_0      */ 4,
+	/* PRIO_EHCI_0      */ 5,
+	/* PRIO_OHCI_1      */ 6,
+	/* PRIO_EHCI_1      */ 7,
+	/* 0x3C             */ -1,
+	/* PRIO_XMA         */ 11,
+	/* PRIO_AUDIO       */ 12,
+	/* 0x48             */ -1,
+	/* PRIO_ENET        */ 10,
+	/* 0x50             */ -1,
+	/* PRIO_XPS         */ -1,
+	/* PRIO_GRAPHICS    */ -1,
+	/* 0x5C             */ -1,
+	/* PRIO_PROFILER    */ -1,
+	/* PRIO_BIU         */ -1,
+	/* PRIO_IOC         */ -1,
+	/* PRIO_FSB         */ -1,
+	/* PRIO_IPI_2       */ -1,
+	/* PRIO_CLOCK       */ 0,
+	/* PRIO_IPI_1       */ -1,
+	/* PRIO_NONE        */ -1,
 };
 
 static void disconnect_pci_irq(int prio)
@@ -96,22 +133,23 @@ static void disconnect_pci_irq(int prio)
 
 	printk(KERN_DEBUG "xenon IIC: disconnect irq 0x%.2X\n", prio);
 
-	for (i=0; i<0x10; ++i)
-		if (xenon_pci_irq_map[i] == prio)
-			writel(0, bridge_base + 0x10 + i * 4);
+	i = xenon_pci_irq_map[prio >> 2];
+	if (i != -1) {
+		writel(0, bridge_base + 0x10 + i * 4);
+	}
 }
 
-	/* connects an PCI IRQ to CPU #0 */
+/* connects an PCI IRQ to CPU #0 */
 static void connect_pci_irq(int prio)
 {
 	int i;
 
-	printk(KERN_WARNING "xenon IIC: connect irq 0x%.2X\n", prio);
+	printk(KERN_INFO "xenon IIC: connect irq 0x%.2X\n", prio);
 
-	for (i = 0; i < 0x10; ++i)
-		if (xenon_pci_irq_map[i] == prio)
-			writel(0x0800180 | (xenon_pci_irq_map[i] / 4),
-			       bridge_base + 0x10 + i * 4);
+	i = xenon_pci_irq_map[prio >> 2];
+	if (i != -1) {
+		writel(0x0800180 | (prio >> 2), bridge_base + 0x10 + i * 4);
+	}
 }
 
 static void iic_ack(struct irq_data *data)
@@ -160,60 +198,51 @@ void xenon_init_irq_on_cpu(int cpu)
 	out_be64(iic_base + cpu * 0x1000, 1 << cpu); /* "who am i" */
 
 	/* read in and ack all outstanding interrupts */
-	while (in_be64(iic_base + cpu * 0x1000 + 0x50) != 0x7C);
+	while (in_be64(iic_base + cpu * 0x1000 + 0x50) != PRIO_NONE);
 	out_be64(iic_base + cpu * 0x1000 + 0x68, 0);
 }
 
 /* Get an IRQ number from the pending state register of the IIC */
-static unsigned int iic_get_irq(void) {
-  int cpu = hard_smp_processor_id();
-  void *my_iic_base;
-  int index;
+static unsigned int iic_get_irq(void)
+{
+	int cpu = hard_smp_processor_id();
+	void *my_iic_base;
+	int index;
 
-  my_iic_base = iic_base + cpu * 0x1000;
+	my_iic_base = iic_base + cpu * 0x1000;
 
-  /* read destructive pending interrupt */
-  index = in_be64(my_iic_base + 0x50) & 0x7F;
+	/* read destructive pending interrupt */
+	index = in_be64(my_iic_base + 0x50) & 0x7C;
 
-  out_be64(my_iic_base + 0x08, 0x7c); /* current task priority */
-  mb();
-  in_be64(my_iic_base + 0x08); /* irql */
+	/* Write out the highest interrupt priority to temporarily disable
+	 * interrupts, then read it back for good measure(?) */
+	out_be64(my_iic_base + 0x08, PRIO_NONE);
+	mb();
+	in_be64(my_iic_base + 0x08);
 
-  /* HACK: we will handle some (otherwise unhandled) interrupts here
-     to prevent them flooding. */
-  switch (index) {
-    case PRIO_GRAPHICS:
-      writel(0, graphics + 0xed0);   // RBBM_INT_CNTL
-      writel(0, graphics + 0x6540);  // R500_DxMODE_INT_MASK
-      break;
-    case PRIO_IOC:
-      writel(0, biu + 0x4002c);
-      break;
-    case PRIO_CLOCK:
-      writel(0, bridge_base + 0x106C);
-      break;
-    default:
-      break;
-  }
+	/* HACK: we will handle some (otherwise unhandled) interrupts here
+	   to prevent them flooding. */
+	switch (index) {
+	case PRIO_GRAPHICS:
+		writel(0, graphics + 0xed0);  // RBBM_INT_CNTL
+		writel(0, graphics + 0x6540); // R500_DxMODE_INT_MASK
+		break;
+	case PRIO_IOC:
+		writel(0, biu + 0x4002c);
+		break;
+	case PRIO_CLOCK:
+		writel(0, bridge_base + 0x106C);
+		break;
+	default:
+		break;
+	}
 
-#if 0
-	/* should be handled */
-	if (index == PRIO_IPI_1)
-		return index;
-	if (index == PRIO_IPI_2)
-		return index;
-	if (index == PRIO_IPI_3)
-		return index;
-	if (index == PRIO_IPI_4)
-		return index;
-#endif
+	/* No interrupt. This really shouldn't happen. */
+	if (index == PRIO_NONE) {
+		return NO_IRQ;
+	}
 
-  /* ??? What is this? */
-  if (index == 0x7C) {
-	  return NO_IRQ;
-  }
-
-  return index;
+	return index;
 }
 
 static int xenon_irq_host_map(struct irq_domain *h, unsigned int virq,
@@ -241,7 +270,6 @@ void __init xenon_iic_init_IRQ(void)
 	struct resource res;
 
 	printk(KERN_DEBUG "xenon IIC: init\n");
-
 			/* search for our interrupt controller inside the device tree */
 	for (dn = NULL;
 	     (dn = of_find_node_by_name(dn, "interrupt-controller")) != NULL;) {
@@ -334,10 +362,9 @@ static void xenon_request_ipi(int ipi, const char *name)
 	int prio = ipi_to_prio(ipi), virq;
 
 	virq = irq_create_mapping(host, prio);
-	if (virq == NO_IRQ)
-	{
-		printk(KERN_ERR
-				"xenon_request_ipi: failed to map IPI%d (%s)\n", prio, name);
+	if (virq == NO_IRQ) {
+		printk(KERN_ERR "xenon_request_ipi: failed to map IPI%d (%s)\n",
+		       prio, name);
 		return;
 	}
 
