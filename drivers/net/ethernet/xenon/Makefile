@@ -1,1 +1,1 @@
-obj-$(CONFIG_XENON_ENET) += xenon_net.o
+obj-$(CONFIG_NET_XENON) += xenon_net.o

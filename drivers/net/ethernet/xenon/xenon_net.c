@@ -39,10 +39,10 @@
 static char version[] = KERN_INFO XENONNET_DRIVER_LOAD_MSG "\n";
 
 static struct pci_device_id xenon_net_pci_tbl[] = {
-    {PCI_VENDOR_ID_MICROSOFT, 0x580a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-    {
-	0,
-    }};
+	{PCI_VENDOR_ID_MICROSOFT, 0x580a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{
+		0,
+	}};
 
 MODULE_DEVICE_TABLE(pci, xenon_net_pci_tbl);
 
@@ -201,7 +201,6 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 		netif_receive_skb(skb);
 
 		received++;
-		dev->last_rx = jiffies;
 
 		mapping = tp->rx_skbuff_dma[index] = pci_map_single(
 		    tp->pdev, new_skb->data, tp->rx_buf_sz, PCI_DMA_FROMDEVICE);
@@ -234,7 +233,7 @@ static int xenon_net_poll(struct napi_struct *napi, int budget)
 	work_done += xenon_net_rx_interrupt(dev, tp, tp->mmio_addr);
 
 	if (work_done < budget) {
-		__napi_complete(napi);
+		napi_complete(napi);
 	}
 
 	return work_done;
@@ -443,7 +442,6 @@ static int xenon_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	xenon_set_tx_descriptor(tp, entry, skb->len, mapping, 1);
 
-	dev->trans_start = jiffies;
 	atomic_inc(&tp->tx_next_free);
 	if ((atomic_read(&tp->tx_next_free) - atomic_read(&tp->tx_next_done)) >=
 	    TX_RING_SIZE) {
@@ -497,7 +495,6 @@ static void xenon_net_tx_timeout(struct net_device *dev, unsigned int txqueue)
 	spin_unlock_irqrestore(&tp->lock, flags);
 	enable_irq(dev->irq);
 
-	dev->trans_start = jiffies;
 	tp->stats.tx_errors++;
 	netif_wake_queue(dev);
 }
