@@ -160,12 +160,12 @@ static void iic_ack(struct irq_data *data)
 
 static void iic_mask(struct irq_data *data)
 {
-	disconnect_pci_irq(data->irq);
+	disconnect_pci_irq(data->hwirq);
 }
 
 static void iic_unmask(struct irq_data *data)
 {
-	connect_pci_irq(data->irq);
+	connect_pci_irq(data->hwirq);
 }
 
 static void iic_eoi(struct irq_data *data)
@@ -174,11 +174,11 @@ static void iic_eoi(struct irq_data *data)
 	out_be64(iic_base + cpu * 0x1000 + 0x68, 0x00); /* EOI and set priority */
 }
 
-static void ipi_send_mask(struct irq_data *data,
+static void xenon_ipi_send_mask(struct irq_data *data,
 				const struct cpumask *dest)
 {
 	out_be64(iic_base + hard_smp_processor_id() * 0x1000 + 0x10,
-		 ((cpumask_bits(dest)[0] << 16) & 0x3F) | (data->irq & 0x7C));
+		 ((cpumask_bits(dest)[0] << 16) & 0x3F) | (data->hwirq & 0x7C));
 }
 
 static struct irq_chip xenon_pic = {
@@ -187,7 +187,7 @@ static struct irq_chip xenon_pic = {
 	.irq_mask = iic_mask,
 	.irq_unmask = iic_unmask,
 	.irq_eoi = iic_eoi,
-	.ipi_send_mask = ipi_send_mask,
+	.ipi_send_mask = xenon_ipi_send_mask,
 	.flags = 0,
 };
 
