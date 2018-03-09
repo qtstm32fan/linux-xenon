@@ -8,6 +8,7 @@
  * as published by the Free Software Foundation.
  */
 
+#include <linux/cpumask.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqnr.h>
@@ -73,7 +74,7 @@ static struct irq_domain *host;
  * Important interrupt registers (per CPU):
  *
  * 0x00: CPU_WHOAMI
- * 0x08: CPU_CURRENT_TASK_PRI: only receive interrupts higher than this (read changes)
+ * 0x08: CPU_CURRENT_TASK_PRI: only receive interrupts higher than this
  * 0x10: CPU_IPI_DISPATCH_0
  * 0x18: unused(?)
  * 0x20: ? (read changes)
@@ -82,13 +83,12 @@ static struct irq_domain *host;
  * 0x38: same value as 0x20(?) (read changes)
  * 0x40: unused(?)
  * 0x48: unused(?)
- * 0x50: incoming interrupts (read changes)
- * 0x58: duplicate of 0x50? (read changes)
- * 0x60: interrupt ACK?
- * 0x68: interrupt EOI? select?
- * 0x70: interrupt MCACK? mask? max interrupt? always writing 0x7C
+ * 0x50: ACK
+ * 0x58: ACK + set CPU_CURRENT_TASK_PRI
+ * 0x60: EOI
+ * 0x68: EOI + set CPU_CURRENT_TASK_PRI
+ * 0x70: interrupt MCACK? mask? max interrupt? CPU dies when writing stuff that isn't 0x7C
  * 0xF0: ?
- * 
  */
 
 /* CPU IRQ -> bridge (PCI) IRQ */
@@ -148,14 +148,14 @@ static void connect_pci_irq(int prio)
 
 	i = xenon_pci_irq_map[prio >> 2];
 	if (i != -1) {
-		writel(0x0800180 | (prio >> 2), bridge_base + 0x10 + i * 4);
+		writel(0x00800080 | (0x100 << 0) | (prio >> 2), bridge_base + 0x10 + i * 4);
 	}
 }
 
 static void iic_ack(struct irq_data *data)
 {
 	int cpu = hard_smp_processor_id();
-	out_be64(iic_base + cpu * 0x1000 + 0x60, 0); // ACK?
+	out_be64(iic_base + cpu * 0x1000 + 0x60, 0x00); /* EOI */
 }
 
 static void iic_mask(struct irq_data *data)
@@ -165,20 +165,20 @@ static void iic_mask(struct irq_data *data)
 
 static void iic_unmask(struct irq_data *data)
 {
-	int i;
 	connect_pci_irq(data->irq);
-
-	/* ?? ACK on all CPUs */
-	for (i = 0; i < 6; ++i)
-		out_be64(iic_base + i * 0x1000 + 0x68, 0);
 }
 
 static void iic_eoi(struct irq_data *data)
 {
 	int cpu = hard_smp_processor_id();
-	out_be64(iic_base + cpu * 0x1000 + 0x68, 0); /* EOI ACK? */
-	mb();
-	in_be64(iic_base + cpu * 0x1000 + 0x08);
+	out_be64(iic_base + cpu * 0x1000 + 0x68, 0x00); /* EOI and set priority */
+}
+
+static void ipi_send_mask(struct irq_data *data,
+				const struct cpumask *dest)
+{
+	out_be64(iic_base + hard_smp_processor_id() * 0x1000 + 0x10,
+		 ((cpumask_bits(dest)[0] << 16) & 0x3F) | (data->irq & 0x7C));
 }
 
 static struct irq_chip xenon_pic = {
@@ -187,19 +187,21 @@ static struct irq_chip xenon_pic = {
 	.irq_mask = iic_mask,
 	.irq_unmask = iic_unmask,
 	.irq_eoi = iic_eoi,
+	.ipi_send_mask = ipi_send_mask,
+	.flags = 0,
 };
 
 void xenon_init_irq_on_cpu(int cpu)
 {
 	printk(KERN_INFO "xenon IIC: init on cpu %i\n", cpu);
+
 	/* init that cpu's interrupt controller */
-	out_be64(iic_base + cpu * 0x1000 + 0x70, 0x7c);
-	out_be64(iic_base + cpu * 0x1000 + 0x08, 0);  /* irql */
+	out_be64(iic_base + cpu * 0x1000 + 0x70, 0x7C);
 	out_be64(iic_base + cpu * 0x1000, 1 << cpu); /* "who am i" */
 
 	/* read in and ack all outstanding interrupts */
 	while (in_be64(iic_base + cpu * 0x1000 + 0x50) != PRIO_NONE);
-	out_be64(iic_base + cpu * 0x1000 + 0x68, 0);
+	out_be64(iic_base + cpu * 0x1000 + 0x68, 0); /* EOI and set priority to 0 */
 }
 
 /* Get an IRQ number from the pending state register of the IIC */
@@ -211,14 +213,8 @@ static unsigned int iic_get_irq(void)
 
 	my_iic_base = iic_base + cpu * 0x1000;
 
-	/* read destructive pending interrupt */
-	index = in_be64(my_iic_base + 0x50) & 0x7C;
-
-	/* Write out the highest interrupt priority to temporarily disable
-	 * interrupts, then read it back for good measure(?) */
-	out_be64(my_iic_base + 0x08, PRIO_NONE);
-	mb();
-	in_be64(my_iic_base + 0x08);
+	/* read destructive pending interrupt and set priority */
+	index = in_be64(my_iic_base + 0x58) & 0x7C;
 
 	/* HACK: we will handle some (otherwise unhandled) interrupts here
 	   to prevent them flooding. */
@@ -339,13 +335,13 @@ static int ipi_to_prio(int ipi)
 	return 0;
 }
 
-void xenon_cause_IPI(int target, int msg)
+void xenon_cause_IPI(int cpu, int msg)
 {
 	int ipi_prio;
 
 	ipi_prio = ipi_to_prio(msg);
 	out_be64(iic_base + 0x10 + hard_smp_processor_id() * 0x1000,
-		 (0x10000 << target) | ipi_prio);
+		 (0x10000 << cpu) | ipi_prio);
 }
 
 /*
@@ -359,7 +355,8 @@ static irqreturn_t xenon_ipi_action(int irq, void *dev_id)
 
 static void xenon_request_ipi(int ipi, const char *name)
 {
-	int prio = ipi_to_prio(ipi), virq;
+	int virq;
+	int prio = ipi_to_prio(ipi);
 
 	virq = irq_create_mapping(host, prio);
 	if (virq == NO_IRQ) {
