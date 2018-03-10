@@ -157,6 +157,7 @@ void udbg_shutdown_xenon(void);
 #endif
 
 static int __init xenosfb_probe(struct platform_device *dev) {
+  struct screen_info screen_info;
   struct fb_info *info;
   int err;
   unsigned int size_vmode;
@@ -241,8 +242,8 @@ static int __init xenosfb_probe(struct platform_device *dev) {
   screen_info.lfb_linelength =
       screen_info.lfb_width * screen_info.lfb_depth / 4;
 
-  gfx[0x120 / 4] = screen_info.lfb_linelength /
-                   8; /* fixup pitch, in case we switched resolution */
+  /* fixup pitch, in case we switched resolution */
+  gfx[0x120 / 4] = screen_info.lfb_linelength / 8;
 
   printk(KERN_INFO "xenosfb: detected %dx%d framebuffer @ 0x%08x\n",
          screen_info.lfb_width, screen_info.lfb_height, screen_info.lfb_base);
@@ -355,6 +356,8 @@ static int __init xenosfb_probe(struct platform_device *dev) {
     goto err_fb_dealoc;
   }
 
+  par->ati_regs->enable = 1;
+
 // Shut down the early framebuffer driver (if enabled).
 #ifdef CONFIG_PPC_EARLY_DEBUG_XENON
 	udbg_shutdown_xenon();
@@ -381,6 +384,7 @@ static int __exit xenosfb_remove(struct platform_device *dev) {
 
   if (info) {
     xenosfb_par_t *par = info->par;
+    par->ati_regs->enable = 0;
 
     unregister_framebuffer(info);
     fb_dealloc_cmap(&info->cmap);
