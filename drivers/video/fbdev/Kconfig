@@ -658,7 +658,7 @@ config FB_N411
 	  Hecuba form using the n411 devkit.
 
 config FB_XENOS
-	bool "Xbox 360 Framebuffer Support"
+	tristate "Xbox 360 Framebuffer Support"
 	depends on (FB = y) && PPC
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
