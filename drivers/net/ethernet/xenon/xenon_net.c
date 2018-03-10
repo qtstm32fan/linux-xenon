@@ -11,7 +11,6 @@
 // Documentation for NAPI can be found at:
 // https://wiki.linuxfoundation.org/networking/napi
 
-#include <asm/io.h>
 #include <linux/crc32.h>
 #include <linux/delay.h>
 #include <linux/etherdevice.h>
@@ -24,6 +23,16 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
+
+#include <asm/io.h>
+#include <asm/udbg.h>
+
+#define DEBUG
+#if defined(DEBUG)
+#define DBG udbg_printf
+#else
+#define DBG pr_debug
+#endif
 
 #define XENONNET_VERSION "1.0.1"
 #define MODNAME "xenon_net"
@@ -258,7 +267,7 @@ static irqreturn_t xenon_net_interrupt(int irq, void *dev_id)
 	}
 
 	// tx interrupt (ring 1 or 0)
-	if (status & 0x00000014) {
+	if (status & 0x0000000C) {
 		xenon_net_tx_interrupt(dev, tp, ioaddr);
 	}
 
@@ -405,12 +414,13 @@ static void xenon_net_hw_start(struct net_device *dev)
 	writel(0x00101c11, ioaddr + RX_CONFIG); /* enable rx */
 
 	// Interrupts:
+	// 0x20000000 = ??
 	// 0x00010000 = multicast related
 	// 0x00000040 = rx
-	// 0x00000010 = tx (1)
+	// 0x00000008 = tx (1)
 	// 0x00000004 = tx (0)
-	writel(0x00010054, ioaddr + INTERRUPT_MASK);
-	writel(0x00010054, ioaddr + INTERRUPT_STATUS);
+	writel(0x00010044, ioaddr + INTERRUPT_MASK);
+	writel(0x00010044, ioaddr + INTERRUPT_STATUS);
 
 	netif_start_queue(dev);
 }
