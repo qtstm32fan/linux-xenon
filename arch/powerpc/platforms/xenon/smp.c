@@ -12,9 +12,14 @@
 #include <linux/kernel.h>
 #include <linux/cpu.h>
 #include <linux/module.h>
+
 #include <asm/machdep.h>
+#include <asm/smp.h>
+#include <asm/udbg.h>
+
 #include "interrupt.h"
 
+#define DEBUG
 #if defined(DEBUG)
 #define DBG udbg_printf
 #else
@@ -49,30 +54,17 @@ static int smp_xenon_cpu_bootable(unsigned int nr)
 	return 1;
 }
 
-extern void xenon_cause_IPI(int target, int msg);
-
-static void smp_xenon_message_pass(int target, int msg)
+static void smp_xenon_message_pass(int cpu, int msg)
 {
-	unsigned int i;
-
-	if (target < NR_CPUS) {
-		xenon_cause_IPI(target, msg);
-	} else {
-		for_each_online_cpu(i)
-		{
-			/*
-			if (target == MSG_ALL_BUT_SELF
-			    && i == smp_processor_id())
-				continue;
-			*/
-			xenon_cause_IPI(i, msg);
-		}
-	}
+	xenon_cause_IPI(cpu, msg);
 }
 
 static struct smp_ops_t xenon_smp_ops = {
 	.probe = smp_xenon_probe,
 	.message_pass = smp_xenon_message_pass,
+#ifdef CONFIG_HOTPLUG_CPU
+	.cpu_die = generic_cpu_die,
+#endif
 	.kick_cpu = smp_generic_kick_cpu,
 	.setup_cpu = smp_xenon_setup_cpu,
 	.cpu_bootable = smp_xenon_cpu_bootable,
