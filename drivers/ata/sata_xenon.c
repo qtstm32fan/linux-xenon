@@ -74,7 +74,7 @@ static void xenon_bmdma_error_handler(struct ata_port *ap);
 
 static const struct pci_device_id xenon_pci_tbl[] = {
 	{ PCI_VDEVICE(MICROSOFT, 0x5803), 0 },
-	{ PCI_VDEVICE(MICROSOFT, 0x5802), 0 },
+	/* { PCI_VDEVICE(MICROSOFT, 0x5802), 0 }, */
 
 	{ }	/* terminate list */
 };
