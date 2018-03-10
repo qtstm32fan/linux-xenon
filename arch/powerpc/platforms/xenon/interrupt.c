@@ -139,7 +139,7 @@ static void disconnect_pci_irq(int prio)
 	}
 }
 
-/* connects an PCI IRQ to CPU #0 */
+/* connects an PCI IRQ to CPU #4 */
 static void connect_pci_irq(int prio)
 {
 	int i;
@@ -148,7 +148,7 @@ static void connect_pci_irq(int prio)
 
 	i = xenon_pci_irq_map[prio >> 2];
 	if (i != -1) {
-		writel(0x00800080 | (0x100 << 0) | (prio >> 2), bridge_base + 0x10 + i * 4);
+		writel(0x00800080 | (0x10 << 8) | (prio >> 2), bridge_base + 0x10 + i * 4);
 	}
 }
 
