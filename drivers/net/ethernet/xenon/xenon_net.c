@@ -197,8 +197,9 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 
 		mapping = tp->rx_skbuff_dma[index];
 
-		new_skb = dev_alloc_skb(tp->rx_buf_sz);
-		new_skb->dev = dev;
+		new_skb = netdev_alloc_skb(dev, tp->rx_buf_sz);
+		if (!new_skb)
+			break; /* Failed to alloc memory, we'll break off and try again later. */
 
 		pci_unmap_single(tp->pdev, mapping, tp->rx_buf_sz,
 				 PCI_DMA_FROMDEVICE);
@@ -239,9 +240,16 @@ static int xenon_net_poll(struct napi_struct *napi, int budget)
 	BUG_ON(dev == NULL);
 
 	work_done = 0;
-	work_done += xenon_net_rx_interrupt(dev, tp, tp->mmio_addr);
+
+	if (budget > 0) {
+		work_done += xenon_net_rx_interrupt(dev, tp, tp->mmio_addr);
+	}
+
+	/* Process the transmission ring */
+	xenon_net_tx_interrupt(dev, tp, tp->mmio_addr);
 
 	if (work_done < budget) {
+		/* TODO: Re-enable interrupts here. */
 		napi_complete(napi);
 	}
 
@@ -258,17 +266,12 @@ static irqreturn_t xenon_net_interrupt(int irq, void *dev_id)
 	spin_lock(&tp->lock);
 	status = readl(ioaddr + INTERRUPT_STATUS);
 
-	// rx interrupt
+	// tx or rx interrupt
 	// TODO: Disable RX interrupts here, re-enable in handler.
-	if (status & 0x00000040) {
+	if (status & 0x0000004C) {
 		if (napi_schedule_prep(&tp->napi)) {
 			__napi_schedule(&tp->napi);
 		}
-	}
-
-	// tx interrupt (ring 1 or 0)
-	if (status & 0x0000000C) {
-		xenon_net_tx_interrupt(dev, tp, ioaddr);
 	}
 
 	spin_unlock(&tp->lock);
