@@ -135,9 +135,11 @@ static void xenon_set_rx_descriptor(struct xenon_net_private *tp, int index,
 		descr[1] = 0;
 }
 
-static void xenon_net_tx_interrupt(struct net_device *dev,
+static int xenon_net_tx_interrupt(struct net_device *dev,
 				   struct xenon_net_private *tp, void *ioaddr)
 {
+	int work = 0;
+
 	BUG_ON(dev == NULL);
 	BUG_ON(tp == NULL);
 	BUG_ON(ioaddr == NULL);
@@ -155,6 +157,7 @@ static void xenon_net_tx_interrupt(struct net_device *dev,
 			break;
 		}
 
+		work++;
 		pci_unmap_single(tp->pdev, tp->tx_skbuff_dma[e],
 				 tp->tx_skbuff[e]->len, PCI_DMA_TODEVICE);
 		dev_kfree_skb_irq(tp->tx_skbuff[e]);
@@ -168,19 +171,20 @@ static void xenon_net_tx_interrupt(struct net_device *dev,
 	if ((atomic_read(&tp->tx_next_free) - atomic_read(&tp->tx_next_done)) <
 	    TX_RING_SIZE)
 		netif_start_queue(dev);
+	
+	return work;
 }
 
 static int xenon_net_rx_interrupt(struct net_device *dev,
-				  struct xenon_net_private *tp, void *ioaddr)
+				  struct xenon_net_private *tp, void *ioaddr,
+				  int budget)
 {
-	int received; // count and send to work_done
+	int received = 0; // count and send to work_done
 
 	BUG_ON(dev == NULL);
 	BUG_ON(tp == NULL);
 	BUG_ON(ioaddr == NULL);
 	BUG_ON(tp->rx_descriptor_base == NULL);
-
-	received = 0;
 
 	while (1) {
 		u32 size;
@@ -193,14 +197,15 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 		if (le32_to_cpu(descr[1]) & 0x80000000)
 			break;
 
-		size = le32_to_cpu(descr[0]) & 0xFFFF;
-
-		mapping = tp->rx_skbuff_dma[index];
+		if (received >= budget)
+			break; /* Over-budget. */
 
 		new_skb = netdev_alloc_skb(dev, tp->rx_buf_sz);
 		if (!new_skb)
 			break; /* Failed to alloc memory, we'll break off and try again later. */
 
+		size = le32_to_cpu(descr[0]) & 0xFFFF;
+		mapping = tp->rx_skbuff_dma[index];
 		pci_unmap_single(tp->pdev, mapping, tp->rx_buf_sz,
 				 PCI_DMA_FROMDEVICE);
 
@@ -209,7 +214,6 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 		skb->protocol = eth_type_trans(skb, dev);
 
 		netif_receive_skb(skb);
-
 		received++;
 
 		mapping = tp->rx_skbuff_dma[index] = pci_map_single(
@@ -221,8 +225,11 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 
 		tp->rx_next = (tp->rx_next + 1) % RX_RING_SIZE;
 	}
-	// enable RX
-	writel(0x00101c11, ioaddr + RX_CONFIG);
+
+	if (received > 0) {
+		/* enable RX */
+		writel(0x00101c11, ioaddr + RX_CONFIG);
+	}
 
 	return received;
 }
@@ -239,17 +246,17 @@ static int xenon_net_poll(struct napi_struct *napi, int budget)
 	dev = tp->dev2;
 	BUG_ON(dev == NULL);
 
-	work_done = 0;
-
-	if (budget > 0) {
-		work_done += xenon_net_rx_interrupt(dev, tp, tp->mmio_addr);
-	}
+	work_done = xenon_net_rx_interrupt(dev, tp, tp->mmio_addr, budget);
 
 	/* Process the transmission ring */
-	xenon_net_tx_interrupt(dev, tp, tp->mmio_addr);
+	if (xenon_net_tx_interrupt(dev, tp, tp->mmio_addr) == TX_RING_SIZE) {
+		/* We've processed the entire ring, so count it against the rest of the budget. */
+		work_done = max(work_done, budget);
+	}
 
 	if (work_done < budget) {
-		/* TODO: Re-enable interrupts here. */
+		/* Re-enable network interrupts. */
+		writel(0x00010044, tp->mmio_addr + INTERRUPT_MASK);
 		napi_complete(napi);
 	}
 
@@ -266,9 +273,11 @@ static irqreturn_t xenon_net_interrupt(int irq, void *dev_id)
 	spin_lock(&tp->lock);
 	status = readl(ioaddr + INTERRUPT_STATUS);
 
-	// tx or rx interrupt
-	// TODO: Disable RX interrupts here, re-enable in handler.
+	/* tx or rx interrupt */
 	if (status & 0x0000004C) {
+		/* Disable interrupts. */
+		writel(0, ioaddr + INTERRUPT_MASK);
+
 		if (napi_schedule_prep(&tp->napi)) {
 			__napi_schedule(&tp->napi);
 		}
