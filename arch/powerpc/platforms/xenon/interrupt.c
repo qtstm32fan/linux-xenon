@@ -92,7 +92,7 @@ static struct irq_domain *host;
  */
 
 /* CPU IRQ -> bridge (PCI) IRQ */
-static int xenon_pci_irq_map[] = {
+static const uint8_t xenon_pci_irq_map[] = {
 	/* 0x00             */ -1,
 	/* 0x04             */ -1,
 	/* PRIO_IPI_4       */ -1,
@@ -131,7 +131,7 @@ static void disconnect_pci_irq(int prio)
 {
 	int i;
 
-	printk(KERN_DEBUG "xenon IIC: disconnect irq 0x%.2X\n", prio);
+	printk(KERN_INFO "xenon IIC: disconnect irq 0x%.2X\n", prio);
 
 	i = xenon_pci_irq_map[prio >> 2];
 	if (i != -1) {
@@ -139,23 +139,29 @@ static void disconnect_pci_irq(int prio)
 	}
 }
 
-/* connects an PCI IRQ to CPU #4 */
-static void connect_pci_irq(int prio)
+/* connects a PCI IRQ to a CPU */
+static void connect_pci_irq(int prio, int target_cpu)
 {
-	int i;
+	uint8_t i;
 
 	printk(KERN_INFO "xenon IIC: connect irq 0x%.2X\n", prio);
 
 	i = xenon_pci_irq_map[prio >> 2];
 	if (i != -1) {
-		writel(0x00800080 | (0x10 << 8) | (prio >> 2), bridge_base + 0x10 + i * 4);
-	}
-}
+		/*
+		 * Bits:
+		 * 0x00800000 = enable(?)
+		 * 0x00200000 = latched
+		 * 0x00003F00 = cpu target
+		 * 0x00000080 = level sensitive
+		 * 0x0000007F = CPU IRQ
+		 */
+		uint32_t bits = 0x00800080;
+		bits |= ((1 << target_cpu) & 0xFF) << 8;
+		bits |= (prio >> 2) & 0x3F;
 
-static void iic_ack(struct irq_data *data)
-{
-	int cpu = hard_smp_processor_id();
-	out_be64(iic_base + cpu * 0x1000 + 0x60, 0x00); /* EOI */
+		writel(bits, bridge_base + 0x10 + i * 4);
+	}
 }
 
 static void iic_mask(struct irq_data *data)
@@ -165,28 +171,21 @@ static void iic_mask(struct irq_data *data)
 
 static void iic_unmask(struct irq_data *data)
 {
-	connect_pci_irq(data->hwirq);
-}
-
-static void iic_eoi(struct irq_data *data)
-{
-	int cpu = hard_smp_processor_id();
-	out_be64(iic_base + cpu * 0x1000 + 0x68, 0x00); /* EOI and set priority */
+	connect_pci_irq(data->hwirq, 0);
 }
 
 static void xenon_ipi_send_mask(struct irq_data *data,
 				const struct cpumask *dest)
 {
-	out_be64(iic_base + hard_smp_processor_id() * 0x1000 + 0x10,
+	int cpu = hard_smp_processor_id();
+	out_be64(iic_base + cpu * 0x1000 + 0x10,
 		 ((cpumask_bits(dest)[0] << 16) & 0x3F) | (data->hwirq & 0x7C));
 }
 
 static struct irq_chip xenon_pic = {
 	.name = " XENON-PIC ",
-	.irq_ack = iic_ack,
 	.irq_mask = iic_mask,
 	.irq_unmask = iic_unmask,
-	.irq_eoi = iic_eoi,
 	.ipi_send_mask = xenon_ipi_send_mask,
 	.flags = 0,
 };
@@ -197,6 +196,7 @@ void xenon_init_irq_on_cpu(int cpu)
 
 	/* init that cpu's interrupt controller */
 	out_be64(iic_base + cpu * 0x1000 + 0x70, 0x7C);
+	out_be64(iic_base + cpu * 0x1000 + 0x08, 0); /* Set priority to 0 */
 	out_be64(iic_base + cpu * 0x1000, 1 << cpu); /* "who am i" */
 
 	/* read in and ack all outstanding interrupts */
@@ -213,8 +213,9 @@ static unsigned int iic_get_irq(void)
 
 	my_iic_base = iic_base + cpu * 0x1000;
 
-	/* read destructive pending interrupt and set priority */
-	index = in_be64(my_iic_base + 0x58) & 0x7C;
+	/* read destructive pending interrupt */
+	index = in_be64(my_iic_base + 0x50) & 0x7C;
+	out_be64(my_iic_base + 0x60, 0x0); /* EOI this interrupt. */
 
 	/* HACK: we will handle some (otherwise unhandled) interrupts here
 	   to prevent them flooding. */
@@ -238,7 +239,7 @@ static unsigned int iic_get_irq(void)
 		return NO_IRQ;
 	}
 
-	return index;
+	return irq_linear_revmap(host, index);
 }
 
 static int xenon_irq_host_map(struct irq_domain *h, unsigned int virq,
@@ -281,8 +282,7 @@ void __init xenon_iic_init_IRQ(void)
 
 		iic_base = ioremap(res.start, 0x10000);
 
-		//host = irq_alloc_host(NULL, IRQ_HOST_MAP_NOMAP, 0, &xenon_irq_host_ops, 0);
-		host = irq_domain_add_nomap(NULL, 0x80, &xenon_irq_host_ops, NULL);
+		host = irq_domain_add_linear(NULL, XENON_NR_IRQS, &xenon_irq_host_ops, NULL);
 		host->host_data = of_node_get(dn);
 		BUG_ON(host == NULL);
 		irq_set_default_host(host);
@@ -301,7 +301,7 @@ void __init xenon_iic_init_IRQ(void)
 	writel(0x40000000, biu + 0x40074);
 	writel(0xea000050, biu + 0x40078);
 
-	writel(0, bridge_base + 0xc);
+	writel(0, bridge_base + 0xc);  /* Interrupt mask register */
 	writel(0x3, bridge_base);
 
 		/* disconnect all PCI IRQs until they are requested */
@@ -316,16 +316,16 @@ void __init xenon_iic_init_IRQ(void)
 static int ipi_to_prio(int ipi)
 {
 	switch (ipi) {
-	case PPC_MSG_CALL_FUNCTION:
+	case PPC_MSG_NMI_IPI:
 		return PRIO_IPI_1;
 		break;
 	case PPC_MSG_RESCHEDULE:
 		return PRIO_IPI_2;
 		break;
-	case PPC_MSG_TICK_BROADCAST:
+	case PPC_MSG_CALL_FUNCTION:
 		return PRIO_IPI_3;
 		break;
-	case PPC_MSG_NMI_IPI:
+	case PPC_MSG_TICK_BROADCAST:
 		return PRIO_IPI_4;
 		break;
 	default:
@@ -344,15 +344,6 @@ void xenon_cause_IPI(int cpu, int msg)
 		 (0x10000 << cpu) | ipi_prio);
 }
 
-/*
-static irqreturn_t xenon_ipi_action(int irq, void *dev_id)
-{
-	int ipi = (int)(long)dev_id;
-	smp_request_message_ipi(irq, ipi);
-	return IRQ_HANDLED;
-}
-*/
-
 static void xenon_request_ipi(int ipi, const char *name)
 {
 	int virq;
@@ -366,19 +357,13 @@ static void xenon_request_ipi(int ipi, const char *name)
 	}
 
 	smp_request_message_ipi(virq, ipi);
-
-	/*
-	if (request_irq(prio, xenon_ipi_action, IRQF_DISABLED,
-			name, (void *)(long)ipi) != 0)
-		printk(KERN_ERR "request irq for ipi failed!\n");
-	*/
 }
 
 void xenon_request_IPIs(void)
 {
+	xenon_request_ipi(PPC_MSG_TICK_BROADCAST, "IPI-tick-broadcast");
 	xenon_request_ipi(PPC_MSG_CALL_FUNCTION, "IPI-call");
 	xenon_request_ipi(PPC_MSG_RESCHEDULE, "IPI-resched");
-	xenon_request_ipi(PPC_MSG_TICK_BROADCAST, "IPI-tick-broadcast");
 	xenon_request_ipi(PPC_MSG_NMI_IPI, "IPI-nmi-ipi");
 }
 
