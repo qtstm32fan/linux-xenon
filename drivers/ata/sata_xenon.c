@@ -127,16 +127,13 @@ static int xenon_scr_read (struct ata_link *link, unsigned int sc_reg, u32 *val)
 {
 	struct pci_dev *pdev = to_pci_dev(link->ap->host->dev);
 	unsigned int cfg_addr;
-	u32 val2;
 
 	cfg_addr = get_scr_cfg_addr(sc_reg);
 
 	if (cfg_addr == -1)
-		return 0; /* assume no error */
+		return -EINVAL;
 
-	pci_read_config_dword(pdev, cfg_addr, &val2);
-
-	*val = val2;
+	pci_read_config_dword(pdev, cfg_addr, val);
 	return 0;
 }
 
@@ -192,7 +189,6 @@ static int xenon_init_one (struct pci_dev *pdev, const struct pci_device_id *ent
 	struct ata_port_info pi = xenon_port_info;
 	const struct ata_port_info *ppi[] = { &pi, NULL };
 	int rc;
-	int pci_dev_busy = 0;
 
 	if (!printed_version++)
 		dev_printk(KERN_INFO, &pdev->dev, "version " DRV_VERSION "\n");
@@ -203,7 +199,6 @@ static int xenon_init_one (struct pci_dev *pdev, const struct pci_device_id *ent
 
 	rc = pci_request_regions(pdev, DRV_NAME);
 	if (rc) {
-		pci_dev_busy = 1;
 		goto err_out;
 	}
 
@@ -239,8 +234,7 @@ err_out_regions:
 	pci_release_regions(pdev);
 
 err_out:
-	if (!pci_dev_busy)
-		pci_disable_device(pdev);
+	pci_disable_device(pdev);
 	return rc;
 }
 
