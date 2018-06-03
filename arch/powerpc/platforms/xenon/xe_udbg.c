@@ -23,7 +23,6 @@
 
 typedef struct console_context {
   void __iomem *fb;
-  uint32_t early_uninitialized;
   uint32_t width;
   uint32_t height;
 
@@ -88,7 +87,7 @@ static void console_scroll32(console_context_t *context,
   // fill up last lines with background color
   fb = (uint32_t *)(context->fb + console_size * 4 - bs * lines);
   end = (uint32_t *)(context->fb + console_size * 4);
-  while (fb != end) *fb++ = 0x00000000;
+  memset(fb, 0x00000000, (end - fb) * 4);
 }
 
 static void console_newline(console_context_t *context) {
