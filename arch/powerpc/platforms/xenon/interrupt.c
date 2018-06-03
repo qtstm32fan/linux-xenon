@@ -319,10 +319,10 @@ static int ipi_to_prio(int ipi)
 	case PPC_MSG_NMI_IPI:
 		return PRIO_IPI_1;
 		break;
-	case PPC_MSG_RESCHEDULE:
+	case PPC_MSG_CALL_FUNCTION:
 		return PRIO_IPI_2;
 		break;
-	case PPC_MSG_CALL_FUNCTION:
+	case PPC_MSG_RESCHEDULE:
 		return PRIO_IPI_3;
 		break;
 	case PPC_MSG_TICK_BROADCAST:
@@ -335,16 +335,16 @@ static int ipi_to_prio(int ipi)
 	return 0;
 }
 
-void xenon_cause_IPI(int cpu, int msg)
+void xenon_cause_IPI(int target_cpu, int msg)
 {
 	int ipi_prio;
+	int cpu = hard_smp_processor_id();
 
 	ipi_prio = ipi_to_prio(msg);
-	out_be64(iic_base + 0x10 + hard_smp_processor_id() * 0x1000,
-		 (0x10000 << cpu) | ipi_prio);
+	out_be64(iic_base + cpu * 0x1000 + 0x10, (0x10000 << target_cpu) | ipi_prio);
 }
 
-static void xenon_request_ipi(int ipi, const char *name)
+static void xenon_request_ipi(int ipi)
 {
 	int virq;
 	int prio = ipi_to_prio(ipi);
@@ -352,19 +352,20 @@ static void xenon_request_ipi(int ipi, const char *name)
 	virq = irq_create_mapping(host, prio);
 	if (virq == NO_IRQ) {
 		printk(KERN_ERR "xenon_request_ipi: failed to map IPI%d (%s)\n",
-		       prio, name);
+		       prio, smp_ipi_name[ipi]);
 		return;
 	}
 
-	smp_request_message_ipi(virq, ipi);
+	if (smp_request_message_ipi(virq, ipi))
+		irq_dispose_mapping(virq);
 }
 
 void xenon_request_IPIs(void)
 {
-	xenon_request_ipi(PPC_MSG_TICK_BROADCAST, "IPI-tick-broadcast");
-	xenon_request_ipi(PPC_MSG_CALL_FUNCTION, "IPI-call");
-	xenon_request_ipi(PPC_MSG_RESCHEDULE, "IPI-resched");
-	xenon_request_ipi(PPC_MSG_NMI_IPI, "IPI-nmi-ipi");
+	xenon_request_ipi(PPC_MSG_TICK_BROADCAST);
+	xenon_request_ipi(PPC_MSG_CALL_FUNCTION);
+	xenon_request_ipi(PPC_MSG_RESCHEDULE);
+	xenon_request_ipi(PPC_MSG_NMI_IPI);
 }
 
 #endif
