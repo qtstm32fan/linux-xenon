@@ -709,12 +709,8 @@ static int xenon_net_init_one(struct pci_dev *pdev,
 	if (rc)
 		dev_err(&pdev->dev, "Failed to set MAC address: %i\n", rc);
 
-	printk(KERN_INFO "%s: at 0x%lx, "
-			 "%2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x, "
-			 "IRQ %d\n",
-	       dev->name, dev->base_addr, dev->dev_addr[0], dev->dev_addr[1],
-	       dev->dev_addr[2], dev->dev_addr[3], dev->dev_addr[4],
-	       dev->dev_addr[5], dev->irq);
+	printk(KERN_INFO "%s: %pM, IRQ %d\n",
+	       dev->name, dev->dev_addr, dev->irq);
 
 	return 0;
 }
