@@ -11,12 +11,14 @@
 #include <linux/cpumask.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include <linux/irqnr.h>
 #include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/types.h>
 #include <linux/ioport.h>
 #include <linux/irqdesc.h>
+#include <linux/of_address.h>
 
 #ifdef CONFIG_SMP
 #include <linux/smp.h>
@@ -239,7 +241,7 @@ static unsigned int iic_get_irq(void)
 		return NO_IRQ;
 	}
 
-	return irq_linear_revmap(host, index);
+	return irq_find_mapping(host, index);
 }
 
 static int xenon_irq_host_map(struct irq_domain *h, unsigned int virq,

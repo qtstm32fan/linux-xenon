@@ -17,7 +17,7 @@
 #include <linux/delay.h>
 #include <linux/string.h>
 #include <linux/init.h>
-
+#include <linux/of.h>
 #include <asm/sections.h>
 #include <asm/io.h>
 #include <asm/prom.h>
@@ -158,7 +158,7 @@ void __init xenon_pci_init(void)
 	struct device_node *np, *root;
 	struct device_node *dev = NULL;
 
-	root = of_find_node_by_path("/");
+	root = of_root;
 	if (root == NULL) {
 		printk(KERN_CRIT "xenon_pci_init: can't find root of device tree\n");
 		return;

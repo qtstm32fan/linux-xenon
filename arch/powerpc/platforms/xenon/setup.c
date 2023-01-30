@@ -15,7 +15,7 @@
 #include <linux/root_dev.h>
 #include <linux/console.h>
 #include <linux/kexec.h>
-
+#include <linux/of.h>
 #include <asm/mmu.h>
 #include <asm/pci-bridge.h>
 #include <asm/ppc-pci.h>
@@ -43,7 +43,7 @@ static void xenon_show_cpuinfo(struct seq_file *m)
 	struct device_node *root;
 	const char *model = "";
 
-	root = of_find_node_by_path("/");
+	root = of_root;
 	if (root)
 		model = of_get_property(root, "model", NULL);
 	seq_printf(m, "machine\t\t: %s\n", model);

@@ -689,7 +689,7 @@ static int xenon_net_init_one(struct pci_dev *pdev,
 	//	dev->ethtool_ops = &xenon_net_ethtool_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
 
-	netif_napi_add(dev, &tp->napi, xenon_net_poll, 64);
+	netif_napi_add(dev, &tp->napi, xenon_net_poll);
 
 	dev->irq = pdev->irq;
 	dev->base_addr = (unsigned long)ioaddr;
