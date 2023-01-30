@@ -158,8 +158,8 @@ static int xenon_net_tx_interrupt(struct net_device *dev,
 		}
 
 		work++;
-		pci_unmap_single(tp->pdev, tp->tx_skbuff_dma[e],
-				 tp->tx_skbuff[e]->len, PCI_DMA_TODEVICE);
+		dma_unmap_single(&tp->pdev->dev, tp->tx_skbuff_dma[e],
+				 tp->tx_skbuff[e]->len, DMA_TO_DEVICE);
 		dev_kfree_skb_irq(tp->tx_skbuff[e]);
 
 		tp->tx_skbuff[e] = 0;
@@ -206,8 +206,8 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 
 		size = le32_to_cpu(descr[0]) & 0xFFFF;
 		mapping = tp->rx_skbuff_dma[index];
-		pci_unmap_single(tp->pdev, mapping, tp->rx_buf_sz,
-				 PCI_DMA_FROMDEVICE);
+		dma_unmap_single(&tp->pdev->dev, mapping, tp->rx_buf_sz,
+				 DMA_FROM_DEVICE);
 
 		skb->ip_summed = CHECKSUM_NONE;
 		skb_put(skb, size);
@@ -216,8 +216,8 @@ static int xenon_net_rx_interrupt(struct net_device *dev,
 		netif_receive_skb(skb);
 		received++;
 
-		mapping = tp->rx_skbuff_dma[index] = pci_map_single(
-		    tp->pdev, new_skb->data, tp->rx_buf_sz, PCI_DMA_FROMDEVICE);
+		mapping = tp->rx_skbuff_dma[index] = dma_map_single(
+		    &tp->pdev->dev, new_skb->data, tp->rx_buf_sz, DMA_FROM_DEVICE);
 		tp->rx_skbuff[index] = new_skb;
 
 		xenon_set_rx_descriptor(tp, index, tp->rx_buf_sz,
@@ -315,9 +315,9 @@ static void xenon_net_init_ring(struct net_device *dev)
 	}
 
 	/* allocate descriptor memory */
-	tp->tx_descriptor_base = pci_alloc_consistent(
-	    tp->pdev, TX_RING_SIZE * 0x10 + RX_RING_SIZE * 0x10,
-	    &tp->tx_descriptor_base_dma);
+	tp->tx_descriptor_base = dma_alloc_coherent(
+	    &tp->pdev->dev, TX_RING_SIZE * 0x10 + RX_RING_SIZE * 0x10,
+	    &tp->tx_descriptor_base_dma, GFP_ATOMIC);
 
 	/* rx is right after tx */
 	tp->rx_descriptor_base = tp->tx_descriptor_base + TX_RING_SIZE * 0x10;
@@ -336,8 +336,8 @@ static void xenon_net_init_ring(struct net_device *dev)
 			break;
 
 		skb->dev = dev; /* Mark as being used by this device. */
-		tp->rx_skbuff_dma[i] = pci_map_single(
-		    tp->pdev, skb->data, tp->rx_buf_sz, PCI_DMA_FROMDEVICE);
+		tp->rx_skbuff_dma[i] = dma_map_single(
+		    &tp->pdev->dev, skb->data, tp->rx_buf_sz, DMA_FROM_DEVICE);
 
 		xenon_set_rx_descriptor(tp, i, tp->rx_buf_sz,
 					tp->rx_skbuff_dma[i], 1);
@@ -459,7 +459,7 @@ static int xenon_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	len = skb->len;
 
-	mapping = pci_map_single(tp->pdev, skb->data, len, PCI_DMA_TODEVICE);
+	mapping = dma_map_single(&tp->pdev->dev, skb->data, len, DMA_TO_DEVICE);
 	tp->tx_skbuff_dma[entry] = mapping;
 
 	xenon_set_tx_descriptor(tp, entry, skb->len, mapping, 1);
@@ -487,9 +487,9 @@ static void xenon_net_tx_clear(struct xenon_net_private *tp)
 	/* Dump the unsent Tx packets. */
 	for (i = 0; i < TX_RING_SIZE; i++) {
 		if (tp->tx_skbuff_dma[i] != 0) {
-			pci_unmap_single(tp->pdev, tp->tx_skbuff_dma[i],
+			dma_unmap_single(&tp->pdev->dev, tp->tx_skbuff_dma[i],
 					 tp->tx_skbuff[i]->len,
-					 PCI_DMA_TODEVICE);
+					 DMA_TO_DEVICE);
 		}
 		if (tp->tx_skbuff[i]) {
 			dev_kfree_skb(tp->tx_skbuff[i]);
@@ -555,7 +555,7 @@ static int xenon_net_close(struct net_device *dev)
 	free_irq(dev->irq, dev);
 	xenon_net_tx_clear(tp);
 
-	pci_free_consistent(tp->pdev, TX_RING_SIZE * 0x10 + RX_RING_SIZE * 0x10,
+	dma_free_coherent(&tp->pdev->dev, TX_RING_SIZE * 0x10 + RX_RING_SIZE * 0x10,
 			    tp->tx_descriptor_base, tp->tx_descriptor_base_dma);
 
 	// BUG: Race condition with xenon_net_poll (napi_disable should stop it?)
