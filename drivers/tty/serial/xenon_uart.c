@@ -325,7 +325,7 @@ static int __init xenon_init(void)
 	if (result)
 		return result;
 
-	xenon_port.membase = ioremap_nocache(xenon_port.mapbase, 0x10);
+	xenon_port.membase = ioremap(xenon_port.mapbase, 0x10);
 
 	result = uart_add_one_port(&xenon_reg, &xenon_port);
 	dprintk("Xenon uart_add_one_port() = %d", result);
@@ -401,7 +401,7 @@ static struct console xenon_console = {
 
 static int __init xenon_serial_console_init(void)
 {
-	xenon_port.membase = ioremap_nocache(xenon_port.mapbase, 0x10);
+	xenon_port.membase = ioremap(xenon_port.mapbase, 0x10);
 
 	register_console(&xenon_console);
 	return 0;

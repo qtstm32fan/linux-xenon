@@ -22,7 +22,6 @@
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 
-
 #define DRV_NAME	"rtc-xenon"
 #define DRV_VERSION	"0.1"
 
@@ -32,7 +31,7 @@
 
 int xenon_smc_message_wait(void *msg);
 
-static unsigned long xenon_get_rtc(void)
+static time64_t xenon_get_rtc(void)
 {
 	unsigned char msg[16] = { 0x04 };
 	unsigned long msec;
@@ -59,19 +58,18 @@ static int xenon_set_rtc(unsigned long secs)
 
 static int xenon_read_time(struct device *dev, struct rtc_time *tm)
 {
-	rtc_time_to_tm(xenon_get_rtc(), tm);
+	rtc_time64_to_tm(xenon_get_rtc(), tm);
 	return 0;
 }
 
 
 static int xenon_set_time(struct device *dev, struct rtc_time *tm)
 {
-	unsigned long msec;
-	int err;
+	time64_t msec;
 
-	err = rtc_tm_to_time(tm, &msec);
-	if (err)
-		return err;
+	msec = rtc_tm_to_time64(tm);
+	if (msec == -1)
+		return msec;
 
 	return xenon_set_rtc(msec);
 }
@@ -83,7 +81,7 @@ static const struct rtc_class_ops xenon_rtc_ops = {
 
 static int __init xenon_rtc_probe(struct platform_device *pdev)
 {
-	struct rtc_device *rtc = rtc_device_register(DRV_NAME, &pdev->dev,
+	struct rtc_device *rtc = devm_rtc_device_register(&pdev->dev, DRV_NAME,
 				     &xenon_rtc_ops, THIS_MODULE);
 
 	printk("xenon_rtc_probe(%p) = %p\n", pdev, rtc);
@@ -94,11 +92,26 @@ static int __init xenon_rtc_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int xenon_rtc_unregister(struct rtc_device *rtc) {
+
+	if (rtc->dev.devt)
+		cdev_del(&rtc->char_dev);
+	return 0;
+}
+
 static int __exit xenon_rtc_remove(struct platform_device *pdev)
 {
 	struct rtc_device *rtc = platform_get_drvdata(pdev);
 
-	rtc_device_unregister(rtc);
+	mutex_lock(&rtc->ops_lock);
+		/* remove innards of this RTC, then disable it, before
+		 * letting any rtc_class_open() users access it again
+		 */
+		xenon_rtc_unregister(rtc);
+		device_unregister(&rtc->dev);
+		rtc->ops = NULL;
+		mutex_unlock(&rtc->ops_lock);
+		put_device(&rtc->dev);
 	return 0;
 }
 

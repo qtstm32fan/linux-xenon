@@ -113,7 +113,7 @@ static inline u32 bswap32(u32 t)
 void xenon_smc_send_message(unsigned char *msg)
 {
 
-	void *base = ioremap_nocache(0x200ea001000, 0x1000);
+	void *base = ioremap(0x200ea001000, 0x1000);
 
 	while (!(readl(base + 0x84) & 4));
 	writel(4, base + 0x84);
@@ -133,13 +133,15 @@ static inline void snd_xenon_set_irq_flag(struct snd_xenon *chip, int cmd)
 
 static irqreturn_t snd_xenon_interrupt(int irq, void *dev_id)
 {
+	struct snd_xenon *chip = dev_id;
+
 	printk("xenon_snd: give me an interrupt, please!\n");
 	return IRQ_HANDLED;
 }
 
-static void snd_xenon_timer_fn(unsigned long data)
+static void snd_xenon_timer_fn(struct timer_list *t)
 {
-	struct snd_xenon *chip = (struct snd_xenon *)data;
+	struct snd_xenon *chip = (struct snd_xenon *)from_timer(chip,t,timer);
 	u32 reg;
 	int rptr_descr, wptr_descr, cur_len, size;
 
@@ -304,7 +306,7 @@ static int snd_xenon_playback_prepare(struct snd_pcm_substream *substream)
 	spin_lock_irq(&chip->lock);
 
 	device->dma_base_virt =
-		ioremap_nocache(runtime->dma_addr, runtime->dma_bytes);
+		ioremap(runtime->dma_addr, runtime->dma_bytes);
 
 	memset(device->dma_base_virt, 0, runtime->dma_bytes);
 	cache_flush(device->dma_base_virt, runtime->dma_bytes);
@@ -450,7 +452,7 @@ static int snd_xenon_new_pcm(struct snd_xenon *chip)
 
 	/* pre-allocation of buffers */
 	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
-	snd_dma_pci_data(chip->pci), 64*1024, 64*1024);
+	&chip->pci->dev, 64*1024, 64*1024);
 
 	err = snd_pcm_new(chip->card, "Xenon Audio", 1, 1, 0, &pcm);
 	if (err < 0)
@@ -461,7 +463,7 @@ static int snd_xenon_new_pcm(struct snd_xenon *chip)
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK,
 				&snd_xenon_spdif_playback_ops);
 	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
-	snd_dma_pci_data(chip->pci), 64*1024, 64*1024);
+	&chip->pci->dev, 64*1024, 64*1024);
 
 	return 0;
 }
@@ -542,7 +544,7 @@ static int snd_xenon_create(struct snd_card *card,
 	}
 
 	chip->iobase_phys = pci_resource_start(pci, 0);
-	chip->iobase_virt = ioremap_nocache(chip->iobase_phys,
+	chip->iobase_virt = ioremap(chip->iobase_phys,
 				      pci_resource_len(pci, 0));
 
 	printk("snd_xenon: iobase_phys=0x%lx iobase_virt=0x%llx\n", chip->iobase_phys, (unsigned long long)chip->iobase_virt);
@@ -575,11 +577,13 @@ static int snd_xenon_create(struct snd_card *card,
 
 	*rchip = chip;
 
-	init_timer(&chip->timer);
-	chip->timer.function = snd_xenon_timer_fn;
-	chip->timer.data = (unsigned long)chip;
+	//init_timer(&chip->timer);
+	//chip->timer.function = snd_xenon_timer_fn;
+	//chip->timer.data = (unsigned long)chip;
+	timer_setup(&chip->timer, snd_xenon_timer_fn, 0);
 	chip->timer_in_use = 1;
-	add_timer(&chip->timer);
+
+	//add_timer(&chip->timer);
 
 	printk("snd_xenon: driver initialized\n");
 
@@ -628,7 +632,7 @@ static int snd_xenon_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err < 0)
 		return -ENOMEM;
 
