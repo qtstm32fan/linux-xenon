@@ -126,7 +126,7 @@ struct pinctrl_dev *get_pinctrl_dev_from_of_node(struct device_node *np)
 	mutex_lock(&pinctrldev_list_mutex);
 
 	list_for_each_entry(pctldev, &pinctrldev_list, node)
-		if (pctldev->dev->of_node == np) {
+		if (device_match_of_node(pctldev->dev, np)) {
 			mutex_unlock(&pinctrldev_list_mutex);
 			return pctldev;
 		}
@@ -2100,6 +2100,8 @@ int pinctrl_enable(struct pinctrl_dev *pctldev)
 	if (error) {
 		dev_err(pctldev->dev, "could not claim hogs: %i\n",
 			error);
+		pinctrl_free_pindescs(pctldev, pctldev->desc->pins,
+				      pctldev->desc->npins);
 		mutex_destroy(&pctldev->mutex);
 		kfree(pctldev);
 
@@ -2306,7 +2308,7 @@ EXPORT_SYMBOL_GPL(devm_pinctrl_register_and_init);
 
 /**
  * devm_pinctrl_unregister() - Resource managed version of pinctrl_unregister().
- * @dev: device for which which resource was allocated
+ * @dev: device for which resource was allocated
  * @pctldev: the pinctrl device to unregister.
  */
 void devm_pinctrl_unregister(struct device *dev, struct pinctrl_dev *pctldev)

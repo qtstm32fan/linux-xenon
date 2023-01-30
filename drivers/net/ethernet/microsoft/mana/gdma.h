@@ -239,10 +239,8 @@ struct gdma_event {
 
 struct gdma_queue;
 
-#define CQE_POLLING_BUFFER 512
 struct mana_eq {
 	struct gdma_queue *eq;
-	struct gdma_comp cqe_poll[CQE_POLLING_BUFFER];
 };
 
 typedef void gdma_eq_callback(void *context, struct gdma_queue *q,
@@ -291,11 +289,6 @@ struct gdma_queue {
 			unsigned int msix_index;
 
 			u32 log2_throttle_limit;
-
-			/* NAPI data */
-			struct napi_struct napi;
-			int work_done;
-			int budget;
 		} eq;
 
 		struct {
@@ -319,9 +312,6 @@ struct gdma_queue_spec {
 			void *context;
 
 			unsigned long log2_throttle_limit;
-
-			/* Only used by the MANA device. */
-			struct net_device *ndev;
 		} eq;
 
 		struct {
@@ -358,6 +348,7 @@ struct gdma_context {
 	struct completion	eq_test_event;
 	u32			test_event_eq_id;
 
+	bool			is_pf;
 	void __iomem		*bar0_va;
 	void __iomem		*shm_base;
 	void __iomem		*db_page_base;
@@ -406,7 +397,7 @@ void mana_gd_destroy_queue(struct gdma_context *gc, struct gdma_queue *queue);
 
 int mana_gd_poll_cq(struct gdma_queue *cq, struct gdma_comp *comp, int num_cqe);
 
-void mana_gd_arm_cq(struct gdma_queue *cq);
+void mana_gd_ring_cq(struct gdma_queue *cq, u8 arm_bit);
 
 struct gdma_wqe {
 	u32 reserved	:24;
@@ -479,6 +470,15 @@ struct gdma_eqe {
 #define GDMA_REG_DB_PAGE_SIZE	0x10
 #define GDMA_REG_SHM_OFFSET	0x18
 
+#define GDMA_PF_REG_DB_PAGE_SIZE	0xD0
+#define GDMA_PF_REG_DB_PAGE_OFF		0xC8
+#define GDMA_PF_REG_SHM_OFF		0x70
+
+#define GDMA_SRIOV_REG_CFG_BASE_OFF	0x108
+
+#define MANA_PF_DEVICE_ID 0x00B9
+#define MANA_VF_DEVICE_ID 0x00BA
+
 struct gdma_posted_wqe_info {
 	u32 wqe_size_in_bu;
 };
@@ -496,16 +496,35 @@ enum {
 	GDMA_PROTOCOL_LAST	= GDMA_PROTOCOL_V1,
 };
 
+#define GDMA_DRV_CAP_FLAG_1_EQ_SHARING_MULTI_VPORT BIT(0)
+
+/* Advertise to the NIC firmware: the NAPI work_done variable race is fixed,
+ * so the driver is able to reliably support features like busy_poll.
+ */
+#define GDMA_DRV_CAP_FLAG_1_NAPI_WKDONE_FIX BIT(2)
+
+#define GDMA_DRV_CAP_FLAGS1 \
+	(GDMA_DRV_CAP_FLAG_1_EQ_SHARING_MULTI_VPORT | \
+	 GDMA_DRV_CAP_FLAG_1_NAPI_WKDONE_FIX)
+
+#define GDMA_DRV_CAP_FLAGS2 0
+
+#define GDMA_DRV_CAP_FLAGS3 0
+
+#define GDMA_DRV_CAP_FLAGS4 0
+
 struct gdma_verify_ver_req {
 	struct gdma_req_hdr hdr;
 
 	/* Mandatory fields required for protocol establishment */
 	u64 protocol_ver_min;
 	u64 protocol_ver_max;
-	u64 drv_cap_flags1;
-	u64 drv_cap_flags2;
-	u64 drv_cap_flags3;
-	u64 drv_cap_flags4;
+
+	/* Gdma Driver Capability Flags */
+	u64 gd_drv_cap_flags1;
+	u64 gd_drv_cap_flags2;
+	u64 gd_drv_cap_flags3;
+	u64 gd_drv_cap_flags4;
 
 	/* Advisory fields */
 	u64 drv_ver;

@@ -1,15 +1,5 @@
-/*
- * Copyright (C) 2016 Broadcom
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2016 Broadcom
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -210,8 +200,6 @@ static int iproc_pwmc_probe(struct platform_device *pdev)
 	ip->chip.dev = &pdev->dev;
 	ip->chip.ops = &iproc_pwm_ops;
 	ip->chip.npwm = 4;
-	ip->chip.of_xlate = of_pwm_xlate_with_flags;
-	ip->chip.of_pwm_n_cells = 3;
 
 	ip->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ip->base))

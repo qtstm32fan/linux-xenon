@@ -8,11 +8,10 @@
 #ifndef __INTEL_SVM_H__
 #define __INTEL_SVM_H__
 
-/* Values for rxwp in fault_cb callback */
-#define SVM_REQ_READ	(1<<3)
-#define SVM_REQ_WRITE	(1<<2)
-#define SVM_REQ_EXEC	(1<<1)
-#define SVM_REQ_PRIV	(1<<0)
+/* Page Request Queue depth */
+#define PRQ_ORDER	4
+#define PRQ_RING_MASK	((0x1000 << PRQ_ORDER) - 0x20)
+#define PRQ_DEPTH	((0x1000 << PRQ_ORDER) >> 5)
 
 /*
  * The SVM_FLAG_SUPERVISOR_MODE flag requests a PASID which can be used only
@@ -26,17 +25,5 @@
  * do such IOTLB flushes automatically.
  */
 #define SVM_FLAG_SUPERVISOR_MODE	BIT(0)
-/*
- * The SVM_FLAG_GUEST_MODE flag is used when a PASID bind is for guest
- * processes. Compared to the host bind, the primary differences are:
- * 1. mm life cycle management
- * 2. fault reporting
- */
-#define SVM_FLAG_GUEST_MODE		BIT(1)
-/*
- * The SVM_FLAG_GUEST_PASID flag is used when a guest has its own PASID space,
- * which requires guest and host PASID translation at both directions.
- */
-#define SVM_FLAG_GUEST_PASID		BIT(2)
 
 #endif /* __INTEL_SVM_H__ */

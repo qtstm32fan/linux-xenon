@@ -96,11 +96,13 @@ static int
 nfnl_cthelper_from_nlattr(struct nlattr *attr, struct nf_conn *ct)
 {
 	struct nf_conn_help *help = nfct_help(ct);
+	const struct nf_conntrack_helper *helper;
 
 	if (attr == NULL)
 		return -EINVAL;
 
-	if (help->helper->data_len == 0)
+	helper = rcu_dereference(help->helper);
+	if (!helper || helper->data_len == 0)
 		return -EINVAL;
 
 	nla_memcpy(help->data, attr, sizeof(help->data));
@@ -111,9 +113,11 @@ static int
 nfnl_cthelper_to_nlattr(struct sk_buff *skb, const struct nf_conn *ct)
 {
 	const struct nf_conn_help *help = nfct_help(ct);
+	const struct nf_conntrack_helper *helper;
 
-	if (help->helper->data_len &&
-	    nla_put(skb, CTA_HELP_INFO, help->helper->data_len, &help->data))
+	helper = rcu_dereference(help->helper);
+	if (helper && helper->data_len &&
+	    nla_put(skb, CTA_HELP_INFO, helper->data_len, &help->data))
 		goto nla_put_failure;
 
 	return 0;
@@ -380,10 +384,14 @@ static int
 nfnl_cthelper_update(const struct nlattr * const tb[],
 		     struct nf_conntrack_helper *helper)
 {
+	u32 size;
 	int ret;
 
-	if (tb[NFCTH_PRIV_DATA_LEN])
-		return -EBUSY;
+	if (tb[NFCTH_PRIV_DATA_LEN]) {
+		size = ntohl(nla_get_be32(tb[NFCTH_PRIV_DATA_LEN]));
+		if (size != helper->data_len)
+			return -EBUSY;
+	}
 
 	if (tb[NFCTH_POLICY]) {
 		ret = nfnl_cthelper_update_policy(helper, tb[NFCTH_POLICY]);
@@ -663,14 +671,10 @@ static int nfnl_cthelper_get(struct sk_buff *skb, const struct nfnl_info *info,
 			break;
 		}
 
-		ret = netlink_unicast(info->sk, skb2, NETLINK_CB(skb).portid,
-				      MSG_DONTWAIT);
-		if (ret > 0)
-			ret = 0;
-
-		/* this avoids a loop in nfnetlink. */
-		return ret == -EAGAIN ? -ENOBUFS : ret;
+		ret = nfnetlink_unicast(skb2, info->net, NETLINK_CB(skb).portid);
+		break;
 	}
+
 	return ret;
 }
 

@@ -40,36 +40,10 @@
 #include <drm/ttm/ttm_device.h>
 
 #include "ttm_bo_api.h"
+#include "ttm_kmap_iter.h"
 #include "ttm_placement.h"
 #include "ttm_tt.h"
 #include "ttm_pool.h"
-
-/**
- * struct ttm_lru_bulk_move_pos
- *
- * @first: first BO in the bulk move range
- * @last: last BO in the bulk move range
- *
- * Positions for a lru bulk move.
- */
-struct ttm_lru_bulk_move_pos {
-	struct ttm_buffer_object *first;
-	struct ttm_buffer_object *last;
-};
-
-/**
- * struct ttm_lru_bulk_move
- *
- * @tt: first/last lru entry for BOs in the TT domain
- * @vram: first/last lru entry for BOs in the VRAM domain
- * @swap: first/last lru entry for BOs on the swap list
- *
- * Helper structure for bulk moves on the LRU list.
- */
-struct ttm_lru_bulk_move {
-	struct ttm_lru_bulk_move_pos tt[TTM_MAX_BO_PRIORITY];
-	struct ttm_lru_bulk_move_pos vram[TTM_MAX_BO_PRIORITY];
-};
 
 /*
  * ttm_bo.c
@@ -96,7 +70,7 @@ struct ttm_lru_bulk_move {
  */
 int ttm_bo_mem_space(struct ttm_buffer_object *bo,
 		     struct ttm_placement *placement,
-		     struct ttm_resource *mem,
+		     struct ttm_resource **mem,
 		     struct ttm_operation_ctx *ctx);
 
 /**
@@ -132,7 +106,7 @@ static inline int ttm_bo_reserve(struct ttm_buffer_object *bo,
 				 bool interruptible, bool no_wait,
 				 struct ww_acquire_ctx *ticket)
 {
-	int ret = 0;
+	int ret;
 
 	if (no_wait) {
 		bool success;
@@ -181,15 +155,15 @@ static inline void
 ttm_bo_move_to_lru_tail_unlocked(struct ttm_buffer_object *bo)
 {
 	spin_lock(&bo->bdev->lru_lock);
-	ttm_bo_move_to_lru_tail(bo, &bo->mem, NULL);
+	ttm_bo_move_to_lru_tail(bo);
 	spin_unlock(&bo->bdev->lru_lock);
 }
 
 static inline void ttm_bo_assign_mem(struct ttm_buffer_object *bo,
 				     struct ttm_resource *new_mem)
 {
-	bo->mem = *new_mem;
-	new_mem->mm_node = NULL;
+	WARN_ON(bo->resource);
+	bo->resource = new_mem;
 }
 
 /**
@@ -202,9 +176,7 @@ static inline void ttm_bo_assign_mem(struct ttm_buffer_object *bo,
 static inline void ttm_bo_move_null(struct ttm_buffer_object *bo,
 				    struct ttm_resource *new_mem)
 {
-	struct ttm_resource *old_mem = &bo->mem;
-
-	WARN_ON(old_mem->mm_node != NULL);
+	ttm_resource_free(bo, &bo->resource);
 	ttm_bo_assign_mem(bo, new_mem);
 }
 
@@ -273,6 +245,18 @@ int ttm_bo_move_accel_cleanup(struct ttm_buffer_object *bo,
 			      struct ttm_resource *new_mem);
 
 /**
+ * ttm_bo_move_sync_cleanup.
+ *
+ * @bo: A pointer to a struct ttm_buffer_object.
+ * @new_mem: struct ttm_resource indicating where to move.
+ *
+ * Special case of ttm_bo_move_accel_cleanup where the bo is guaranteed
+ * by the caller to be idle. Typically used after memcpy buffer moves.
+ */
+void ttm_bo_move_sync_cleanup(struct ttm_buffer_object *bo,
+			      struct ttm_resource *new_mem);
+
+/**
  * ttm_bo_pipeline_gutting.
  *
  * @bo: A pointer to a struct ttm_buffer_object.
@@ -306,30 +290,14 @@ int ttm_bo_tt_bind(struct ttm_buffer_object *bo, struct ttm_resource *mem);
  */
 void ttm_bo_tt_destroy(struct ttm_buffer_object *bo);
 
-/**
- * ttm_range_man_init
- *
- * @bdev: ttm device
- * @type: memory manager type
- * @use_tt: if the memory manager uses tt
- * @p_size: size of area to be managed in pages.
- *
- * Initialise a generic range manager for the selected memory type.
- * The range manager is installed for this device in the type slot.
- */
-int ttm_range_man_init(struct ttm_device *bdev,
-		       unsigned type, bool use_tt,
-		       unsigned long p_size);
+void ttm_move_memcpy(bool clear,
+		     u32 num_pages,
+		     struct ttm_kmap_iter *dst_iter,
+		     struct ttm_kmap_iter *src_iter);
 
-/**
- * ttm_range_man_fini
- *
- * @bdev: ttm device
- * @type: memory manager type
- *
- * Remove the generic range manager from a slot and tear it down.
- */
-int ttm_range_man_fini(struct ttm_device *bdev,
-		       unsigned type);
-
+struct ttm_kmap_iter *
+ttm_kmap_iter_iomap_init(struct ttm_kmap_iter_iomap *iter_io,
+			 struct io_mapping *iomap,
+			 struct sg_table *st,
+			 resource_size_t start);
 #endif

@@ -230,7 +230,8 @@ static int skx_get_dimm_config(struct mem_ctl_info *mci, struct res_config *cfg)
 #define SKX_ILV_TARGET(tgt)	((tgt) & 7)
 
 static void skx_show_retry_rd_err_log(struct decoded_addr *res,
-				      char *msg, int len)
+				      char *msg, int len,
+				      bool scrub_err)
 {
 	u32 log0, log1, log2, log3, log4;
 	u32 corr0, corr1, corr2, corr3;
@@ -656,6 +657,9 @@ static int __init skx_init(void)
 	if (owner && strncmp(owner, EDAC_MOD_STR, sizeof(EDAC_MOD_STR)))
 		return -EBUSY;
 
+	if (cpu_feature_enabled(X86_FEATURE_HYPERVISOR))
+		return -ENODEV;
+
 	id = x86_match_cpu(skx_cpuids);
 	if (!id)
 		return -ENODEV;
@@ -710,8 +714,13 @@ static int __init skx_init(void)
 
 	skx_set_decode(skx_decode, skx_show_retry_rd_err_log);
 
-	if (nvdimm_count && skx_adxl_get() == -ENODEV)
-		skx_printk(KERN_NOTICE, "Only decoding DDR4 address!\n");
+	if (nvdimm_count && skx_adxl_get() != -ENODEV) {
+		skx_set_decode(NULL, skx_show_retry_rd_err_log);
+	} else {
+		if (nvdimm_count)
+			skx_printk(KERN_NOTICE, "Only decoding DDR4 address!\n");
+		skx_set_decode(skx_decode, skx_show_retry_rd_err_log);
+	}
 
 	/* Ensure that the OPSTATE is set correctly for POLL or NMI */
 	opstate_init();

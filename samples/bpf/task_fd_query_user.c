@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <linux/bpf.h>
 #include <sys/ioctl.h>
-#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <linux/perf_event.h>
@@ -349,7 +348,7 @@ int main(int argc, char **argv)
 	/* test two functions in the corresponding *_kern.c file */
 	CHECK_AND_RET(test_debug_fs_kprobe(0, "blk_mq_start_request",
 					   BPF_FD_TYPE_KPROBE));
-	CHECK_AND_RET(test_debug_fs_kprobe(1, "blk_account_io_done",
+	CHECK_AND_RET(test_debug_fs_kprobe(1, "__blk_account_io_done",
 					   BPF_FD_TYPE_KRETPROBE));
 
 	/* test nondebug fs kprobe */
@@ -396,7 +395,7 @@ int main(int argc, char **argv)
 	 * on different systems with different compilers. The right way is
 	 * to parse the ELF file. We took a shortcut here.
 	 */
-	uprobe_file_offset = (__u64)main - (__u64)&__executable_start;
+	uprobe_file_offset = (unsigned long)main - (unsigned long)&__executable_start;
 	CHECK_AND_RET(test_nondebug_fs_probe("uprobe", (char *)argv[0],
 					     uprobe_file_offset, 0x0, false,
 					     BPF_FD_TYPE_UPROBE,

@@ -12,11 +12,6 @@
 #include "fu540-prci.h"
 #include "fu740-prci.h"
 
-static const struct prci_clk_desc prci_clk_fu540 = {
-	.clks = __prci_init_clocks_fu540,
-	.num_clks = ARRAY_SIZE(__prci_init_clocks_fu540),
-};
-
 /*
  * Private functions
  */
@@ -564,7 +559,7 @@ static int __prci_register_clocks(struct device *dev, struct __prci_data *pd,
 }
 
 /**
- * sifive_prci_init() - initialize prci data and check parent count
+ * sifive_prci_probe() - initialize prci data and check parent count
  * @pdev: platform device pointer for the prci
  *
  * Return: 0 upon success or a negative error code upon failure.

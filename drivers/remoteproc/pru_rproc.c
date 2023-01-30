@@ -887,6 +887,9 @@ static const struct of_device_id pru_rproc_match[] = {
 	{ .compatible = "ti,am3356-pru",	.data = &pru_data },
 	{ .compatible = "ti,am4376-pru",	.data = &pru_data },
 	{ .compatible = "ti,am5728-pru",	.data = &pru_data },
+	{ .compatible = "ti,am642-pru",		.data = &k3_pru_data },
+	{ .compatible = "ti,am642-rtu",		.data = &k3_rtu_data },
+	{ .compatible = "ti,am642-tx-pru",	.data = &k3_tx_pru_data },
 	{ .compatible = "ti,k2g-pru",		.data = &pru_data },
 	{ .compatible = "ti,am654-pru",		.data = &k3_pru_data },
 	{ .compatible = "ti,am654-rtu",		.data = &k3_rtu_data },
@@ -894,6 +897,7 @@ static const struct of_device_id pru_rproc_match[] = {
 	{ .compatible = "ti,j721e-pru",		.data = &k3_pru_data },
 	{ .compatible = "ti,j721e-rtu",		.data = &k3_rtu_data },
 	{ .compatible = "ti,j721e-tx-pru",	.data = &k3_tx_pru_data },
+	{ .compatible = "ti,am625-pru",		.data = &k3_pru_data },
 	{},
 };
 MODULE_DEVICE_TABLE(of, pru_rproc_match);

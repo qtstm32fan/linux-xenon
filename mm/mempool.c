@@ -17,7 +17,6 @@
 #include <linux/kmemleak.h>
 #include <linux/export.h>
 #include <linux/mempool.h>
-#include <linux/blkdev.h>
 #include <linux/writeback.h>
 #include "slab.h"
 
@@ -106,7 +105,8 @@ static __always_inline void kasan_poison_element(mempool_t *pool, void *element)
 	if (pool->alloc == mempool_alloc_slab || pool->alloc == mempool_kmalloc)
 		kasan_slab_free_mempool(element);
 	else if (pool->alloc == mempool_alloc_pages)
-		kasan_free_pages(element, (unsigned long)pool->pool_data, false);
+		kasan_poison_pages(element, (unsigned long)pool->pool_data,
+				   false);
 }
 
 static void kasan_unpoison_element(mempool_t *pool, void *element)
@@ -114,7 +114,8 @@ static void kasan_unpoison_element(mempool_t *pool, void *element)
 	if (pool->alloc == mempool_alloc_slab || pool->alloc == mempool_kmalloc)
 		kasan_unpoison_range(element, __ksize(element));
 	else if (pool->alloc == mempool_alloc_pages)
-		kasan_alloc_pages(element, (unsigned long)pool->pool_data, false);
+		kasan_unpoison_pages(element, (unsigned long)pool->pool_data,
+				     false);
 }
 
 static __always_inline void add_element(mempool_t *pool, void *element)
@@ -378,7 +379,7 @@ void *mempool_alloc(mempool_t *pool, gfp_t gfp_mask)
 	gfp_t gfp_temp;
 
 	VM_WARN_ON_ONCE(gfp_mask & __GFP_ZERO);
-	might_sleep_if(gfp_mask & __GFP_DIRECT_RECLAIM);
+	might_alloc(gfp_mask);
 
 	gfp_mask |= __GFP_NOMEMALLOC;	/* don't allocate emergency reserves */
 	gfp_mask |= __GFP_NORETRY;	/* don't loop in __alloc_pages */

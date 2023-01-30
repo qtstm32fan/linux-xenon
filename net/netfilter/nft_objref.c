@@ -9,7 +9,7 @@
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>
-#include <net/netfilter/nf_tables.h>
+#include <net/netfilter/nf_tables_core.h>
 
 #define nft_objref_priv(expr)	*((struct nft_object **)nft_expr_priv(expr))
 
@@ -91,6 +91,7 @@ static const struct nft_expr_ops nft_objref_ops = {
 	.activate	= nft_objref_activate,
 	.deactivate	= nft_objref_deactivate,
 	.dump		= nft_objref_dump,
+	.reduce		= NFT_REDUCE_READONLY,
 };
 
 struct nft_objref_map {
@@ -110,7 +111,7 @@ static void nft_objref_map_eval(const struct nft_expr *expr,
 	struct nft_object *obj;
 	bool found;
 
-	found = set->ops->lookup(net, set, &regs->data[priv->sreg], &ext);
+	found = nft_set_do_lookup(net, set, &regs->data[priv->sreg], &ext);
 	if (!found) {
 		ext = nft_set_catchall_lookup(net, set);
 		if (!ext) {
@@ -204,6 +205,7 @@ static const struct nft_expr_ops nft_objref_map_ops = {
 	.deactivate	= nft_objref_map_deactivate,
 	.destroy	= nft_objref_map_destroy,
 	.dump		= nft_objref_map_dump,
+	.reduce		= NFT_REDUCE_READONLY,
 };
 
 static const struct nft_expr_ops *

@@ -25,7 +25,7 @@
 /* The maximum IRQ pin number of mbigen chip(start from 0) */
 #define MAXIMUM_IRQ_PIN_NUM		1407
 
-/**
+/*
  * In mbigen vector register
  * bit[21:12]:	event id value
  * bit[11:0]:	device id
@@ -39,14 +39,14 @@
 /* offset of vector register in mbigen node */
 #define REG_MBIGEN_VEC_OFFSET		0x200
 
-/**
+/*
  * offset of clear register in mbigen node
  * This register is used to clear the status
  * of interrupt
  */
 #define REG_MBIGEN_CLEAR_OFFSET		0xa000
 
-/**
+/*
  * offset of interrupt type register
  * This register is used to configure interrupt
  * trigger type
@@ -207,7 +207,7 @@ static int mbigen_irq_domain_alloc(struct irq_domain *domain,
 	if (err)
 		return err;
 
-	err = platform_msi_domain_alloc(domain, virq, nr_irqs);
+	err = platform_msi_device_domain_alloc(domain, virq, nr_irqs);
 	if (err)
 		return err;
 
@@ -223,7 +223,7 @@ static int mbigen_irq_domain_alloc(struct irq_domain *domain,
 static void mbigen_irq_domain_free(struct irq_domain *domain, unsigned int virq,
 				   unsigned int nr_irqs)
 {
-	platform_msi_domain_free(domain, virq, nr_irqs);
+	platform_msi_device_domain_free(domain, virq, nr_irqs);
 }
 
 static const struct irq_domain_ops mbigen_domain_ops = {
@@ -273,6 +273,12 @@ static int mbigen_of_create_domain(struct platform_device *pdev,
 }
 
 #ifdef CONFIG_ACPI
+static const struct acpi_device_id mbigen_acpi_match[] = {
+	{ "HISI0152", 0 },
+	{}
+};
+MODULE_DEVICE_TABLE(acpi, mbigen_acpi_match);
+
 static int mbigen_acpi_create_domain(struct platform_device *pdev,
 				     struct mbigen_device *mgn_chip)
 {
@@ -368,12 +374,6 @@ static const struct of_device_id mbigen_of_match[] = {
 	{ /* END */ }
 };
 MODULE_DEVICE_TABLE(of, mbigen_of_match);
-
-static const struct acpi_device_id mbigen_acpi_match[] = {
-	{ "HISI0152", 0 },
-	{}
-};
-MODULE_DEVICE_TABLE(acpi, mbigen_acpi_match);
 
 static struct platform_driver mbigen_platform_driver = {
 	.driver = {

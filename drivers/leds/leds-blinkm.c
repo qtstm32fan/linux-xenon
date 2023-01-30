@@ -480,9 +480,8 @@ static int blinkm_led_blue_set(struct led_classdev *led_cdev,
 
 static void blinkm_init_hw(struct i2c_client *client)
 {
-	int ret;
-	ret = blinkm_transfer_hw(client, BLM_STOP_SCRIPT);
-	ret = blinkm_transfer_hw(client, BLM_GO_RGB);
+	blinkm_transfer_hw(client, BLM_STOP_SCRIPT);
+	blinkm_transfer_hw(client, BLM_GO_RGB);
 }
 
 static int blinkm_test_run(struct i2c_client *client)
@@ -678,7 +677,7 @@ exit:
 	return err;
 }
 
-static int blinkm_remove(struct i2c_client *client)
+static void blinkm_remove(struct i2c_client *client)
 {
 	struct blinkm_data *data = i2c_get_clientdata(client);
 	int ret = 0;
@@ -717,7 +716,6 @@ static int blinkm_remove(struct i2c_client *client)
 		dev_err(&client->dev, "Failure in blinkm_remove ignored. Continuing.\n");
 
 	sysfs_remove_group(&client->dev.kobj, &blinkm_group);
-	return 0;
 }
 
 static const struct i2c_device_id blinkm_id[] = {

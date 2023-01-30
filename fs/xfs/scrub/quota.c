@@ -42,16 +42,16 @@ xchk_setup_quota(
 	xfs_dqtype_t		dqtype;
 	int			error;
 
-	if (!XFS_IS_QUOTA_RUNNING(sc->mp) || !XFS_IS_QUOTA_ON(sc->mp))
+	if (!XFS_IS_QUOTA_ON(sc->mp))
 		return -ENOENT;
 
 	dqtype = xchk_quota_to_dqtype(sc);
 	if (dqtype == 0)
 		return -EINVAL;
-	sc->flags |= XCHK_HAS_QUOTAOFFLOCK;
-	mutex_lock(&sc->mp->m_quotainfo->qi_quotaofflock);
+
 	if (!xfs_this_quota_on(sc->mp, dqtype))
 		return -ENOENT;
+
 	error = xchk_setup_fs(sc);
 	if (error)
 		return error;
@@ -127,7 +127,7 @@ xchk_quota_item(
 	 * a reflink filesystem we're allowed to exceed physical space
 	 * if there are no quota limits.
 	 */
-	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
+	if (xfs_has_reflink(mp)) {
 		if (mp->m_sb.sb_dblocks < dq->q_blk.count)
 			xchk_fblock_set_warning(sc, XFS_DATA_FORK,
 					offset);
@@ -185,7 +185,7 @@ xchk_quota_data_fork(
 
 	/* Check for data fork problems that apply only to quota files. */
 	max_dqid_off = ((xfs_dqid_t)-1) / qi->qi_dqperchunk;
-	ifp = XFS_IFORK_PTR(sc->ip, XFS_DATA_FORK);
+	ifp = xfs_ifork_ptr(sc->ip, XFS_DATA_FORK);
 	for_each_xfs_iext(ifp, &icur, &irec) {
 		if (xchk_should_terminate(sc, &error))
 			break;

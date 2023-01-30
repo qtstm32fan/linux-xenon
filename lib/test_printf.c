@@ -30,6 +30,12 @@
 #define PAD_SIZE 16
 #define FILL_CHAR '$'
 
+#define NOWARN(option, comment, block) \
+	__diag_push(); \
+	__diag_ignore_all(#option, comment); \
+	block \
+	__diag_pop();
+
 KSTM_MODULE_GLOBALS();
 
 static char *test_buffer __initdata;
@@ -78,9 +84,14 @@ do_test(int bufsize, const char *expect, int elen,
 		return 1;
 	}
 
-	if (memchr_inv(test_buffer + written + 1, FILL_CHAR, BUF_SIZE + PAD_SIZE - (written + 1))) {
+	if (memchr_inv(test_buffer + written + 1, FILL_CHAR, bufsize - (written + 1))) {
 		pr_warn("vsnprintf(buf, %d, \"%s\", ...) wrote beyond the nul-terminator\n",
 			bufsize, fmt);
+		return 1;
+	}
+
+	if (memchr_inv(test_buffer + bufsize, FILL_CHAR, BUF_SIZE + PAD_SIZE - bufsize)) {
+		pr_warn("vsnprintf(buf, %d, \"%s\", ...) wrote beyond buffer\n", bufsize, fmt);
 		return 1;
 	}
 
@@ -154,9 +165,11 @@ test_number(void)
 	test("0x1234abcd  ", "%#-12x", 0x1234abcd);
 	test("  0x1234abcd", "%#12x", 0x1234abcd);
 	test("0|001| 12|+123| 1234|-123|-1234", "%d|%03d|%3d|%+d|% d|%+d|% d", 0, 1, 12, 123, 1234, -123, -1234);
-	test("0|1|1|128|255", "%hhu|%hhu|%hhu|%hhu|%hhu", 0, 1, 257, 128, -1);
-	test("0|1|1|-128|-1", "%hhd|%hhd|%hhd|%hhd|%hhd", 0, 1, 257, 128, -1);
-	test("2015122420151225", "%ho%ho%#ho", 1037, 5282, -11627);
+	NOWARN(-Wformat, "Intentionally test narrowing conversion specifiers.", {
+		test("0|1|1|128|255", "%hhu|%hhu|%hhu|%hhu|%hhu", 0, 1, 257, 128, -1);
+		test("0|1|1|-128|-1", "%hhd|%hhd|%hhd|%hhd|%hhd", 0, 1, 257, 128, -1);
+		test("2015122420151225", "%ho%ho%#ho", 1037, 5282, -11627);
+	})
 	/*
 	 * POSIX/C99: »The result of converting zero with an explicit
 	 * precision of zero shall be no characters.« Hence the output
@@ -528,6 +541,11 @@ time_and_date(void)
 	test("0119-00-04T15:32:23", "%ptTr", &t);
 	test("15:32:23|2019-01-04", "%ptTt|%ptTd", &t, &t);
 	test("15:32:23|0119-00-04", "%ptTtr|%ptTdr", &t, &t);
+
+	test("2019-01-04 15:32:23", "%ptTs", &t);
+	test("0119-00-04 15:32:23", "%ptTsr", &t);
+	test("15:32:23|2019-01-04", "%ptTts|%ptTds", &t, &t);
+	test("15:32:23|0119-00-04", "%ptTtrs|%ptTdrs", &t, &t);
 }
 
 static void __init
@@ -581,70 +599,59 @@ struct page_flags_test {
 	int width;
 	int shift;
 	int mask;
-	unsigned long value;
 	const char *fmt;
 	const char *name;
 };
 
-static struct page_flags_test pft[] = {
+static const struct page_flags_test pft[] = {
 	{SECTIONS_WIDTH, SECTIONS_PGSHIFT, SECTIONS_MASK,
-	 0, "%d", "section"},
+	 "%d", "section"},
 	{NODES_WIDTH, NODES_PGSHIFT, NODES_MASK,
-	 0, "%d", "node"},
+	 "%d", "node"},
 	{ZONES_WIDTH, ZONES_PGSHIFT, ZONES_MASK,
-	 0, "%d", "zone"},
+	 "%d", "zone"},
 	{LAST_CPUPID_WIDTH, LAST_CPUPID_PGSHIFT, LAST_CPUPID_MASK,
-	 0, "%#x", "lastcpupid"},
+	 "%#x", "lastcpupid"},
 	{KASAN_TAG_WIDTH, KASAN_TAG_PGSHIFT, KASAN_TAG_MASK,
-	 0, "%#x", "kasantag"},
+	 "%#x", "kasantag"},
 };
 
 static void __init
 page_flags_test(int section, int node, int zone, int last_cpupid,
-		int kasan_tag, int flags, const char *name, char *cmp_buf)
+		int kasan_tag, unsigned long flags, const char *name,
+		char *cmp_buf)
 {
 	unsigned long values[] = {section, node, zone, last_cpupid, kasan_tag};
-	unsigned long page_flags = 0;
-	unsigned long size = 0;
+	unsigned long size;
 	bool append = false;
 	int i;
 
-	flags &= BIT(NR_PAGEFLAGS) - 1;
-	if (flags) {
-		page_flags |= flags;
-		snprintf(cmp_buf + size, BUF_SIZE - size, "%s", name);
-		size = strlen(cmp_buf);
-#if SECTIONS_WIDTH || NODES_WIDTH || ZONES_WIDTH || \
-	LAST_CPUPID_WIDTH || KASAN_TAG_WIDTH
-		/* Other information also included in page flags */
-		snprintf(cmp_buf + size, BUF_SIZE - size, "|");
-		size = strlen(cmp_buf);
-#endif
-	}
+	for (i = 0; i < ARRAY_SIZE(values); i++)
+		flags |= (values[i] & pft[i].mask) << pft[i].shift;
 
-	/* Set the test value */
-	for (i = 0; i < ARRAY_SIZE(pft); i++)
-		pft[i].value = values[i];
+	size = scnprintf(cmp_buf, BUF_SIZE, "%#lx(", flags);
+	if (flags & PAGEFLAGS_MASK) {
+		size += scnprintf(cmp_buf + size, BUF_SIZE - size, "%s", name);
+		append = true;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(pft); i++) {
 		if (!pft[i].width)
 			continue;
 
-		if (append) {
-			snprintf(cmp_buf + size, BUF_SIZE - size, "|");
-			size = strlen(cmp_buf);
-		}
+		if (append)
+			size += scnprintf(cmp_buf + size, BUF_SIZE - size, "|");
 
-		page_flags |= (pft[i].value & pft[i].mask) << pft[i].shift;
-		snprintf(cmp_buf + size, BUF_SIZE - size, "%s=", pft[i].name);
-		size = strlen(cmp_buf);
-		snprintf(cmp_buf + size, BUF_SIZE - size, pft[i].fmt,
-			 pft[i].value & pft[i].mask);
-		size = strlen(cmp_buf);
+		size += scnprintf(cmp_buf + size, BUF_SIZE - size, "%s=",
+				pft[i].name);
+		size += scnprintf(cmp_buf + size, BUF_SIZE - size, pft[i].fmt,
+				values[i] & pft[i].mask);
 		append = true;
 	}
 
-	test(cmp_buf, "%pGp", &page_flags);
+	snprintf(cmp_buf + size, BUF_SIZE - size, ")");
+
+	test(cmp_buf, "%pGp", &flags);
 }
 
 static void __init
@@ -670,9 +677,8 @@ flags(void)
 			"uptodate|dirty|lru|active|swapbacked",
 			cmp_buffer);
 
-	flags = VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC
-			| VM_DENYWRITE;
-	test("read|exec|mayread|maywrite|mayexec|denywrite", "%pGv", &flags);
+	flags = VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
+	test("read|exec|mayread|maywrite|mayexec", "%pGv", &flags);
 
 	gfp = GFP_TRANSHUGE;
 	test("GFP_TRANSHUGE", "%pGg", &gfp);

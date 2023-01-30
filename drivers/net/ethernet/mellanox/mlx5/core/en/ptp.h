@@ -6,6 +6,10 @@
 
 #include "en.h"
 #include "en_stats.h"
+#include "en/txrx.h"
+#include <linux/ptp_classify.h>
+
+#define MLX5E_PTP_CHANNEL_IX 0
 
 struct mlx5e_ptpsq {
 	struct mlx5e_txqsq       txqsq;
@@ -14,6 +18,7 @@ struct mlx5e_ptpsq {
 	u16                      skb_fifo_pc;
 	struct mlx5e_skb_fifo    skb_fifo;
 	struct mlx5e_ptp_cq_stats *cq_stats;
+	u16                      ts_cqe_ctr_mask;
 };
 
 enum {
@@ -43,14 +48,45 @@ struct mlx5e_ptp {
 	DECLARE_BITMAP(state, MLX5E_PTP_STATE_NUM_STATES);
 };
 
+static inline bool mlx5e_use_ptpsq(struct sk_buff *skb)
+{
+	struct flow_keys fk;
+
+	if (!(skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP))
+		return false;
+
+	if (!skb_flow_dissect_flow_keys(skb, &fk, 0))
+		return false;
+
+	if (fk.basic.n_proto == htons(ETH_P_1588))
+		return true;
+
+	if (fk.basic.n_proto != htons(ETH_P_IP) &&
+	    fk.basic.n_proto != htons(ETH_P_IPV6))
+		return false;
+
+	return (fk.basic.ip_proto == IPPROTO_UDP &&
+		fk.ports.dst == htons(PTP_EV_PORT));
+}
+
+static inline bool mlx5e_ptpsq_fifo_has_room(struct mlx5e_txqsq *sq)
+{
+	if (!sq->ptpsq)
+		return true;
+
+	return mlx5e_skb_fifo_has_room(&sq->ptpsq->skb_fifo);
+}
+
 int mlx5e_ptp_open(struct mlx5e_priv *priv, struct mlx5e_params *params,
 		   u8 lag_port, struct mlx5e_ptp **cp);
 void mlx5e_ptp_close(struct mlx5e_ptp *c);
 void mlx5e_ptp_activate_channel(struct mlx5e_ptp *c);
 void mlx5e_ptp_deactivate_channel(struct mlx5e_ptp *c);
 int mlx5e_ptp_get_rqn(struct mlx5e_ptp *c, u32 *rqn);
-int mlx5e_ptp_alloc_rx_fs(struct mlx5e_priv *priv);
-void mlx5e_ptp_free_rx_fs(struct mlx5e_priv *priv);
+int mlx5e_ptp_alloc_rx_fs(struct mlx5e_flow_steering *fs,
+			  const struct mlx5e_profile *profile);
+void mlx5e_ptp_free_rx_fs(struct mlx5e_flow_steering *fs,
+			  const struct mlx5e_profile *profile);
 int mlx5e_ptp_rx_manage_fs(struct mlx5e_priv *priv, bool set);
 
 enum {

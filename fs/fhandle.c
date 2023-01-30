@@ -14,7 +14,7 @@
 #include "internal.h"
 #include "mount.h"
 
-static long do_sys_name_to_handle(struct path *path,
+static long do_sys_name_to_handle(const struct path *path,
 				  struct file_handle __user *ufh,
 				  int __user *mnt_id)
 {
@@ -229,7 +229,7 @@ static long do_handle_open(int mountdirfd, struct file_handle __user *ufh,
 		path_put(&path);
 		return fd;
 	}
-	file = file_open_root(path.dentry, path.mnt, "", open_flag, 0);
+	file = file_open_root(&path, "", open_flag, 0);
 	if (IS_ERR(file)) {
 		put_unused_fd(fd);
 		retval =  PTR_ERR(file);

@@ -731,7 +731,7 @@ Details::
     *      Notes: If 'no_async_abort' is defined this callback
     *  	will be invoked from scsi_eh thread. No other commands
     *	will then be queued on current host during eh.
-    *	Otherwise it will be called whenever scsi_times_out()
+    *	Otherwise it will be called whenever scsi_timeout()
     *      is called due to a command timeout.
     *
     *      Optionally defined in: LLD
@@ -1172,10 +1172,9 @@ Members of interest:
                    of 0 implies a successfully completed command (and all
                    data (if any) has been transferred to or from the SCSI
                    target device). 'result' is a 32 bit unsigned integer that
-                   can be viewed as 4 related bytes. The SCSI status value is
-                   in the LSB. See include/scsi/scsi.h status_byte(),
-                   msg_byte(), host_byte() and driver_byte() macros and
-                   related constants.
+                   can be viewed as 2 related bytes. The SCSI status value is
+                   in the LSB. See include/scsi/scsi.h status_byte() and
+                   host_byte() macros and related constants.
     sense_buffer
 		 - an array (maximum size: SCSI_SENSE_BUFFERSIZE bytes) that
                    should be written when the SCSI status (LSB of 'result')

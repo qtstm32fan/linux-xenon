@@ -18,11 +18,13 @@
 #ifndef LSI_MEGARAID_SAS_H
 #define LSI_MEGARAID_SAS_H
 
+#include <scsi/scsi_cmnd.h>
+
 /*
  * MegaRAID SAS Driver meta data
  */
-#define MEGASAS_VERSION				"07.714.04.00-rc1"
-#define MEGASAS_RELDATE				"Apr 14, 2020"
+#define MEGASAS_VERSION				"07.719.03.00-rc1"
+#define MEGASAS_RELDATE				"Sep 29, 2021"
 
 #define MEGASAS_MSIX_NAME_LEN			32
 
@@ -2262,6 +2264,15 @@ enum MR_PERF_MODE {
 		 (mode) == MR_LATENCY_PERF_MODE ? "Latency" : \
 		 "Unknown")
 
+enum MEGASAS_LD_TARGET_ID_STATUS {
+	LD_TARGET_ID_INITIAL,
+	LD_TARGET_ID_ACTIVE,
+	LD_TARGET_ID_DELETED,
+};
+
+#define MEGASAS_TARGET_ID(sdev)						\
+	(((sdev->channel % 2) * MEGASAS_MAX_DEV_PER_CHANNEL) + sdev->id)
+
 struct megasas_instance {
 
 	unsigned int *reply_map;
@@ -2326,6 +2337,9 @@ struct megasas_instance {
 	struct megasas_pd_list          pd_list[MEGASAS_MAX_PD];
 	struct megasas_pd_list          local_pd_list[MEGASAS_MAX_PD];
 	u8 ld_ids[MEGASAS_MAX_LD_IDS];
+	u8 ld_tgtid_status[MEGASAS_MAX_LD_IDS];
+	u8 ld_ids_prev[MEGASAS_MAX_LD_IDS];
+	u8 ld_ids_from_raidmap[MEGASAS_MAX_LD_IDS];
 	s8 init_id;
 
 	u16 max_num_sge;
@@ -2546,6 +2560,9 @@ struct megasas_instance_template {
 #define MEGASAS_IS_LOGICAL(sdev)					\
 	((sdev->channel < MEGASAS_MAX_PD_CHANNELS) ? 0 : 1)
 
+#define MEGASAS_IS_LUN_VALID(sdev)					\
+	(((sdev)->lun == 0) ? 1 : 0)
+
 #define MEGASAS_DEV_INDEX(scp)						\
 	(((scp->device->channel % 2) * MEGASAS_MAX_DEV_PER_CHANNEL) +	\
 	scp->device->id)
@@ -2581,6 +2598,16 @@ struct megasas_cmd {
 		u32 frame_count;
 	};
 };
+
+struct megasas_cmd_priv {
+	void	*cmd_priv;
+	u8	status;
+};
+
+static inline struct megasas_cmd_priv *megasas_priv(struct scsi_cmnd *cmd)
+{
+	return scsi_cmd_priv(cmd);
+}
 
 #define MAX_MGMT_ADAPTERS		1024
 #define MAX_IOCTL_SGE			16

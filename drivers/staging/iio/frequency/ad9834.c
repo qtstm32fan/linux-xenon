@@ -58,6 +58,7 @@
  * @spi:		spi_device
  * @mclk:		external master clock
  * @control:		cached control word
+ * @devid:		device id
  * @xfer:		default spi transfer
  * @msg:		default spi message
  * @freq_xfer:		tuning word spi transfer
@@ -82,11 +83,11 @@ struct ad9834_state {
 	 * DMA (thus cache coherency maintenance) requires the
 	 * transfer buffers to live in their own cache lines.
 	 */
-	__be16				data ____cacheline_aligned;
+	__be16				data __aligned(IIO_DMA_MINALIGN);
 	__be16				freq_data[2];
 };
 
-/**
+/*
  * ad9834_supported_device_ids:
  */
 
@@ -316,7 +317,7 @@ ssize_t ad9834_show_out1_wavetype_available(struct device *dev,
 static IIO_DEVICE_ATTR(out_altvoltage0_out1_wavetype_available, 0444,
 		       ad9834_show_out1_wavetype_available, NULL, 0);
 
-/**
+/*
  * see dds.h for further information
  */
 

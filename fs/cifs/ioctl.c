@@ -1,24 +1,11 @@
+// SPDX-License-Identifier: LGPL-2.1
 /*
- *   fs/cifs/ioctl.c
  *
  *   vfs operations that deal with io control
  *
  *   Copyright (C) International Business Machines  Corp., 2005,2013
  *   Author(s): Steve French (sfrench@us.ibm.com)
  *
- *   This library is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU Lesser General Public License as published
- *   by the Free Software Foundation; either version 2.1 of the License, or
- *   (at your option) any later version.
- *
- *   This library is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU Lesser General Public License for more details.
- *
- *   You should have received a copy of the GNU Lesser General Public License
- *   along with this library; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/fs.h>
@@ -346,6 +333,7 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 			tcon = tlink_tcon(pSMBFile->tlink);
 			caps = le64_to_cpu(tcon->fsUnixInfo.Capability);
 #ifdef CONFIG_CIFS_POSIX
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 			if (CIFS_UNIX_EXTATTR_CAP & caps) {
 				__u64	ExtAttrMask = 0;
 				rc = CIFSGetExtAttr(xid, tcon,
@@ -355,9 +343,10 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 					rc = put_user(ExtAttrBits &
 						FS_FL_USER_VISIBLE,
 						(int __user *)arg);
-				if (rc != EOPNOTSUPP)
+				if (rc != -EOPNOTSUPP)
 					break;
 			}
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 #endif /* CONFIG_CIFS_POSIX */
 			rc = 0;
 			if (CIFS_I(inode)->cifsAttrs & ATTR_COMPRESSED) {
@@ -371,7 +360,7 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 			if (pSMBFile == NULL)
 				break;
 			tcon = tlink_tcon(pSMBFile->tlink);
-			caps = le64_to_cpu(tcon->fsUnixInfo.Capability);
+			/* caps = le64_to_cpu(tcon->fsUnixInfo.Capability); */
 
 			if (get_user(ExtAttrBits, (int __user *)arg)) {
 				rc = -EFAULT;
@@ -384,7 +373,7 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 			 *		       pSMBFile->fid.netfid,
 			 *		       extAttrBits,
 			 *		       &ExtAttrMask);
-			 * if (rc != EOPNOTSUPP)
+			 * if (rc != -EOPNOTSUPP)
 			 *	break;
 			 */
 
@@ -495,8 +484,31 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 			tcon = tlink_tcon(tlink);
 			if (tcon && tcon->ses->server->ops->notify) {
 				rc = tcon->ses->server->ops->notify(xid,
-						filep, (void __user *)arg);
+						filep, (void __user *)arg,
+						false /* no ret data */);
 				cifs_dbg(FYI, "ioctl notify rc %d\n", rc);
+			} else
+				rc = -EOPNOTSUPP;
+			cifs_put_tlink(tlink);
+			break;
+		case CIFS_IOC_NOTIFY_INFO:
+			if (!S_ISDIR(inode->i_mode)) {
+				/* Notify can only be done on directories */
+				rc = -EOPNOTSUPP;
+				break;
+			}
+			cifs_sb = CIFS_SB(inode->i_sb);
+			tlink = cifs_sb_tlink(cifs_sb);
+			if (IS_ERR(tlink)) {
+				rc = PTR_ERR(tlink);
+				break;
+			}
+			tcon = tlink_tcon(tlink);
+			if (tcon && tcon->ses->server->ops->notify) {
+				rc = tcon->ses->server->ops->notify(xid,
+						filep, (void __user *)arg,
+						true /* return details */);
+				cifs_dbg(FYI, "ioctl notify info rc %d\n", rc);
 			} else
 				rc = -EOPNOTSUPP;
 			cifs_put_tlink(tlink);

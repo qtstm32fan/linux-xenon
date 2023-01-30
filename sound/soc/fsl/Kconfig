@@ -19,6 +19,7 @@ config SND_SOC_FSL_SAI
 	select REGMAP_MMIO
 	select SND_SOC_IMX_PCM_DMA if SND_IMX_SOC != n
 	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_FSL_UTILS
 	help
 	  Say Y if you want to add Synchronous Audio Interface (SAI)
 	  support for the Freescale CPUs.
@@ -59,6 +60,7 @@ config SND_SOC_FSL_SPDIF
 	select SND_SOC_IMX_PCM_DMA if SND_IMX_SOC != n
 	select SND_SOC_IMX_PCM_FIQ if SND_IMX_SOC != n && (MXC_TZIC || MXC_AVIC)
 	select BITREVERSE
+	select SND_SOC_FSL_UTILS
 	help
 	  Say Y if you want to add Sony/Philips Digital Interface (SPDIF)
 	  support for the Freescale CPUs.
@@ -80,6 +82,7 @@ config SND_SOC_FSL_MICFIL
 	select REGMAP_MMIO
 	select SND_SOC_IMX_PCM_DMA if SND_IMX_SOC != n
 	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_FSL_UTILS
 	help
 	  Say Y if you want to add Pulse Density Modulation microphone
 	  interface (MICFIL) support for NXP.
@@ -311,6 +314,7 @@ config SND_SOC_FSL_ASOC_CARD
 	select SND_SOC_FSL_ESAI
 	select SND_SOC_FSL_SAI
 	select SND_SOC_FSL_SSI
+	select SND_SOC_TLV320AIC31XX
 	select SND_SOC_WM8994
 	select MFD_WM8994
 	help
@@ -350,6 +354,19 @@ config SND_SOC_IMX_RPMSG
 	  There should be rpmsg devices defined in other core (M core)
 	  Say Y if you want to add support for SoC audio on an i.MX board with
 	  a rpmsg devices.
+
+config SND_SOC_IMX_CARD
+	tristate "SoC Audio Graph Sound Card support for i.MX boards"
+	depends on OF && I2C
+	select SND_SOC_AK4458
+	select SND_SOC_AK5558
+	select SND_SOC_IMX_PCM_DMA
+	select SND_SOC_FSL_SAI
+	select SND_SIMPLE_CARD_UTILS
+	help
+	  This option enables audio sound card support for i.MX boards
+	  with OF-graph DT bindings.
+	  It also support DPCM of single CPU multi Codec ststem.
 
 endif # SND_IMX_SOC
 

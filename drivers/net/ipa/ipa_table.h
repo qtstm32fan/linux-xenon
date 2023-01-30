@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
 /* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
- * Copyright (C) 2019-2021 Linaro Ltd.
+ * Copyright (C) 2019-2022 Linaro Ltd.
  */
 #ifndef _IPA_TABLE_H_
 #define _IPA_TABLE_H_
@@ -13,10 +13,11 @@ struct ipa;
 /* The maximum number of filter table entries (IPv4, IPv6; hashed or not) */
 #define IPA_FILTER_COUNT_MAX	14
 
+/* The number of route table entries allotted to the modem */
+#define IPA_ROUTE_MODEM_COUNT	8
+
 /* The maximum number of route table entries (IPv4, IPv6; hashed or not) */
 #define IPA_ROUTE_COUNT_MAX	15
-
-#ifdef IPA_VALIDATE
 
 /**
  * ipa_table_valid() - Validate route and filter table memory regions
@@ -34,20 +35,6 @@ bool ipa_table_valid(struct ipa *ipa);
  * Return:	true if all regions are valid, false otherwise
  */
 bool ipa_filter_map_valid(struct ipa *ipa, u32 filter_mask);
-
-#else /* !IPA_VALIDATE */
-
-static inline bool ipa_table_valid(struct ipa *ipa)
-{
-	return true;
-}
-
-static inline bool ipa_filter_map_valid(struct ipa *ipa, u32 filter_mask)
-{
-	return true;
-}
-
-#endif /* !IPA_VALIDATE */
 
 /**
  * ipa_table_hash_support() - Return true if hashed tables are supported

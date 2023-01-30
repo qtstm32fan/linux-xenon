@@ -27,7 +27,6 @@ properties:
       - description: Sleep clock source
       - description: PLL test clock source (Optional clock)
     minItems: 2
-    maxItems: 3
 
   clock-names:
     items:
@@ -35,30 +34,16 @@ properties:
       - const: sleep_clk
       - const: core_bi_pll_test_se # Optional clock
     minItems: 2
-    maxItems: 3
-
-  '#clock-cells':
-    const: 1
-
-  '#reset-cells':
-    const: 1
-
-  '#power-domain-cells':
-    const: 1
-
-  reg:
-    maxItems: 1
 
 required:
   - compatible
   - clocks
   - clock-names
-  - reg
-  - '#clock-cells'
-  - '#reset-cells'
-  - '#power-domain-cells'
 
-additionalProperties: false
+allOf:
+  - $ref: qcom,gcc.yaml#
+
+unevaluatedProperties: false
 
 examples:
   - |

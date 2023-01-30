@@ -3536,7 +3536,7 @@ static int idt77252_preset(struct idt77252_dev *card)
 		return -1;
 	}
 	if (!(pci_command & PCI_COMMAND_IO)) {
-		printk("%s: PCI_COMMAND: %04x (???)\n",
+		printk("%s: PCI_COMMAND: %04x (?)\n",
 		       card->name, pci_command);
 		deinit_card(card);
 		return (-1);
@@ -3752,6 +3752,7 @@ static void __exit idt77252_exit(void)
 		card = idt77252_chain;
 		dev = card->atmdev;
 		idt77252_chain = card->next;
+		del_timer_sync(&card->tst_timer);
 
 		if (dev->phy->stop)
 			dev->phy->stop(dev);

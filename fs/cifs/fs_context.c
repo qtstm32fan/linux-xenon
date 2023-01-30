@@ -13,6 +13,9 @@
 #include <linux/magic.h>
 #include <linux/security.h>
 #include <net/net_namespace.h>
+#ifdef CONFIG_CIFS_DFS_UPCALL
+#include "dfs_cache.h"
+#endif
 */
 
 #include <linux/ctype.h>
@@ -34,6 +37,8 @@
 #include "rfc1002pdu.h"
 #include "fs_context.h"
 
+static DEFINE_MUTEX(cifs_mount_mutex);
+
 static const match_table_t cifs_smb_version_tokens = {
 	{ Smb_1, SMB1_VERSION_STRING },
 	{ Smb_20, SMB20_VERSION_STRING},
@@ -54,12 +59,9 @@ static const match_table_t cifs_secflavor_tokens = {
 	{ Opt_sec_krb5p, "krb5p" },
 	{ Opt_sec_ntlmsspi, "ntlmsspi" },
 	{ Opt_sec_ntlmssp, "ntlmssp" },
-	{ Opt_ntlm, "ntlm" },
-	{ Opt_sec_ntlmi, "ntlmi" },
 	{ Opt_sec_ntlmv2, "nontlm" },
 	{ Opt_sec_ntlmv2, "ntlmv2" },
 	{ Opt_sec_ntlmv2i, "ntlmv2i" },
-	{ Opt_sec_lanman, "lanman" },
 	{ Opt_sec_none, "none" },
 
 	{ Opt_sec_err, NULL }
@@ -116,6 +118,8 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_flag("nosharesock", Opt_nosharesock),
 	fsparam_flag_no("persistenthandles", Opt_persistent),
 	fsparam_flag_no("resilienthandles", Opt_resilient),
+	fsparam_flag_no("tcpnodelay", Opt_tcp_nodelay),
+	fsparam_flag("nosparse", Opt_nosparse),
 	fsparam_flag("domainauto", Opt_domainauto),
 	fsparam_flag("rdma", Opt_rdma),
 	fsparam_flag("modesid", Opt_modesid),
@@ -143,10 +147,11 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_u32("actimeo", Opt_actimeo),
 	fsparam_u32("acdirmax", Opt_acdirmax),
 	fsparam_u32("acregmax", Opt_acregmax),
+	fsparam_u32("closetimeo", Opt_closetimeo),
 	fsparam_u32("echo_interval", Opt_echo_interval),
 	fsparam_u32("max_credits", Opt_max_credits),
 	fsparam_u32("handletimeout", Opt_handletimeout),
-	fsparam_u32("snapshot", Opt_snapshot),
+	fsparam_u64("snapshot", Opt_snapshot),
 	fsparam_u32("max_channels", Opt_max_channels),
 
 	/* Mount options which take string value */
@@ -218,23 +223,12 @@ cifs_parse_security_flavors(struct fs_context *fc, char *value, struct smb3_fs_c
 	case Opt_sec_ntlmssp:
 		ctx->sectype = RawNTLMSSP;
 		break;
-	case Opt_sec_ntlmi:
-		ctx->sign = true;
-		fallthrough;
-	case Opt_ntlm:
-		ctx->sectype = NTLM;
-		break;
 	case Opt_sec_ntlmv2i:
 		ctx->sign = true;
 		fallthrough;
 	case Opt_sec_ntlmv2:
 		ctx->sectype = NTLMv2;
 		break;
-#ifdef CONFIG_CIFS_WEAK_PW_HASH
-	case Opt_sec_lanman:
-		ctx->sectype = LANMAN;
-		break;
-#endif
 	case Opt_sec_none:
 		ctx->nullauth = 1;
 		break;
@@ -318,11 +312,11 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	new_ctx->nodename = NULL;
 	new_ctx->username = NULL;
 	new_ctx->password = NULL;
+	new_ctx->server_hostname = NULL;
 	new_ctx->domainname = NULL;
 	new_ctx->UNC = NULL;
 	new_ctx->source = NULL;
 	new_ctx->iocharset = NULL;
-
 	/*
 	 * Make sure to stay in sync with smb3_cleanup_fs_context_contents()
 	 */
@@ -330,6 +324,7 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	DUP_CTX_STR(mount_options);
 	DUP_CTX_STR(username);
 	DUP_CTX_STR(password);
+	DUP_CTX_STR(server_hostname);
 	DUP_CTX_STR(UNC);
 	DUP_CTX_STR(source);
 	DUP_CTX_STR(domainname);
@@ -442,6 +437,42 @@ out:
 }
 
 /*
+ * Remove duplicate path delimiters. Windows is supposed to do that
+ * but there are some bugs that prevent rename from working if there are
+ * multiple delimiters.
+ *
+ * Returns a sanitized duplicate of @path. The caller is responsible for
+ * cleaning up the original.
+ */
+#define IS_DELIM(c) ((c) == '/' || (c) == '\\')
+static char *sanitize_path(char *path)
+{
+	char *cursor1 = path, *cursor2 = path;
+
+	/* skip all prepended delimiters */
+	while (IS_DELIM(*cursor1))
+		cursor1++;
+
+	/* copy the first letter */
+	*cursor2 = *cursor1;
+
+	/* copy the remainder... */
+	while (*(cursor1++)) {
+		/* ... skipping all duplicated delimiters */
+		if (IS_DELIM(*cursor1) && IS_DELIM(*cursor2))
+			continue;
+		*(++cursor2) = *cursor1;
+	}
+
+	/* if the last character is a delimiter, skip it */
+	if (IS_DELIM(*(cursor2 - 1)))
+		cursor2--;
+
+	*(cursor2) = '\0';
+	return kstrdup(path, GFP_KERNEL);
+}
+
+/*
  * Parse a devname into substrings and populate the ctx->UNC and ctx->prepath
  * fields with the result. Returns 0 on success and an error otherwise
  * (e.g. ENOMEM or EINVAL)
@@ -467,6 +498,12 @@ smb3_parse_devname(const char *devname, struct smb3_fs_context *ctx)
 	pos = strpbrk(devname + 2, delims);
 	if (!pos)
 		return -EINVAL;
+
+	/* record the server hostname */
+	kfree(ctx->server_hostname);
+	ctx->server_hostname = kstrndup(devname + 2, pos - devname - 2, GFP_KERNEL);
+	if (!ctx->server_hostname)
+		return -ENOMEM;
 
 	/* skip past delimiter */
 	++pos;
@@ -494,7 +531,7 @@ smb3_parse_devname(const char *devname, struct smb3_fs_context *ctx)
 	if (!*pos)
 		return 0;
 
-	ctx->prepath = kstrdup(pos, GFP_KERNEL);
+	ctx->prepath = sanitize_path(pos);
 	if (!ctx->prepath)
 		return -ENOMEM;
 
@@ -672,10 +709,14 @@ static int smb3_get_tree_common(struct fs_context *fc)
 static int smb3_get_tree(struct fs_context *fc)
 {
 	int err = smb3_fs_context_validate(fc);
+	int ret;
 
 	if (err)
 		return err;
-	return smb3_get_tree_common(fc);
+	mutex_lock(&cifs_mount_mutex);
+	ret = smb3_get_tree_common(fc);
+	mutex_unlock(&cifs_mount_mutex);
+	return ret;
 }
 
 static void smb3_fs_context_free(struct fs_context *fc)
@@ -725,6 +766,10 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 		cifs_errorf(fc, "can not change domainname during remount\n");
 		return -EINVAL;
 	}
+	if (strcmp(new_ctx->workstation_name, old_ctx->workstation_name)) {
+		cifs_errorf(fc, "can not change workstation_name during remount\n");
+		return -EINVAL;
+	}
 	if (new_ctx->nodename &&
 	    (!old_ctx->nodename || strcmp(new_ctx->nodename, old_ctx->nodename))) {
 		cifs_errorf(fc, "can not change nodename during remount\n");
@@ -746,6 +791,13 @@ do {									\
 	cifs_sb->ctx->field = NULL;					\
 } while (0)
 
+#define STEAL_STRING_SENSITIVE(cifs_sb, ctx, field)			\
+do {									\
+	kfree_sensitive(ctx->field);					\
+	ctx->field = cifs_sb->ctx->field;				\
+	cifs_sb->ctx->field = NULL;					\
+} while (0)
+
 static int smb3_reconfigure(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
@@ -758,14 +810,15 @@ static int smb3_reconfigure(struct fs_context *fc)
 		return rc;
 
 	/*
-	 * We can not change UNC/username/password/domainname/nodename/iocharset
+	 * We can not change UNC/username/password/domainname/
+	 * workstation_name/nodename/iocharset
 	 * during reconnect so ignore what we have in the new context and
 	 * just use what we already have in cifs_sb->ctx.
 	 */
 	STEAL_STRING(cifs_sb, ctx, UNC);
 	STEAL_STRING(cifs_sb, ctx, source);
 	STEAL_STRING(cifs_sb, ctx, username);
-	STEAL_STRING(cifs_sb, ctx, password);
+	STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
 	STEAL_STRING(cifs_sb, ctx, domainname);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
@@ -780,6 +833,10 @@ static int smb3_reconfigure(struct fs_context *fc)
 	smb3_cleanup_fs_context_contents(cifs_sb->ctx);
 	rc = smb3_fs_context_dup(cifs_sb->ctx, ctx);
 	smb3_update_mnt_flags(cifs_sb);
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	if (!rc)
+		rc = dfs_cache_remount_fs(cifs_sb);
+#endif
 
 	return rc;
 }
@@ -792,6 +849,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	int i, opt;
 	bool is_smb3 = !strcmp(fc->fs_type->name, "smb3");
 	bool skip_parsing = false;
+	kuid_t uid;
+	kgid_t gid;
 
 	cifs_dbg(FYI, "CIFS: parsing cifs mount option '%s'\n", param->key);
 
@@ -889,6 +948,9 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_nolease:
 		ctx->no_lease = 1;
 		break;
+	case Opt_nosparse:
+		ctx->no_sparse = 1;
+		break;
 	case Opt_nodelete:
 		ctx->nodelete = 1;
 		break;
@@ -904,18 +966,38 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		}
 		break;
 	case Opt_uid:
-		ctx->linux_uid.val = result.uint_32;
+		uid = make_kuid(current_user_ns(), result.uint_32);
+		if (!uid_valid(uid))
+			goto cifs_parse_mount_err;
+		ctx->linux_uid = uid;
 		ctx->uid_specified = true;
 		break;
 	case Opt_cruid:
-		ctx->cred_uid.val = result.uint_32;
+		uid = make_kuid(current_user_ns(), result.uint_32);
+		if (!uid_valid(uid))
+			goto cifs_parse_mount_err;
+		ctx->cred_uid = uid;
+		ctx->cruid_specified = true;
+		break;
+	case Opt_backupuid:
+		uid = make_kuid(current_user_ns(), result.uint_32);
+		if (!uid_valid(uid))
+			goto cifs_parse_mount_err;
+		ctx->backupuid = uid;
+		ctx->backupuid_specified = true;
 		break;
 	case Opt_backupgid:
-		ctx->backupgid.val = result.uint_32;
+		gid = make_kgid(current_user_ns(), result.uint_32);
+		if (!gid_valid(gid))
+			goto cifs_parse_mount_err;
+		ctx->backupgid = gid;
 		ctx->backupgid_specified = true;
 		break;
 	case Opt_gid:
-		ctx->linux_gid.val = result.uint_32;
+		gid = make_kgid(current_user_ns(), result.uint_32);
+		if (!gid_valid(gid))
+			goto cifs_parse_mount_err;
+		ctx->linux_gid = gid;
 		ctx->gid_specified = true;
 		break;
 	case Opt_port:
@@ -1000,11 +1082,18 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		}
 		ctx->acdirmax = ctx->acregmax = HZ * result.uint_32;
 		break;
+	case Opt_closetimeo:
+		ctx->closetimeo = HZ * result.uint_32;
+		if (ctx->closetimeo > SMB3_MAX_DCLOSETIMEO) {
+			cifs_errorf(fc, "closetimeo too large\n");
+			goto cifs_parse_mount_err;
+		}
+		break;
 	case Opt_echo_interval:
 		ctx->echo_interval = result.uint_32;
 		break;
 	case Opt_snapshot:
-		ctx->snapshot_time = result.uint_32;
+		ctx->snapshot_time = result.uint_64;
 		break;
 	case Opt_max_credits:
 		if (result.uint_32 < 20 || result.uint_32 > 60000) {
@@ -1080,7 +1169,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		}
 		break;
 	case Opt_pass:
-		kfree(ctx->password);
+		kfree_sensitive(ctx->password);
 		ctx->password = NULL;
 		if (strlen(param->string) == 0)
 			break;
@@ -1238,10 +1327,17 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			ctx->posix_paths = 1;
 		break;
 	case Opt_unix:
-		if (result.negated)
+		if (result.negated) {
+			if (ctx->linux_ext == 1)
+				pr_warn_once("conflicting posix mount options specified\n");
 			ctx->linux_ext = 0;
-		else
 			ctx->no_linux_ext = 1;
+		} else {
+			if (ctx->no_linux_ext == 1)
+				pr_warn_once("conflicting posix mount options specified\n");
+			ctx->linux_ext = 1;
+			ctx->no_linux_ext = 0;
+		}
 		break;
 	case Opt_nocase:
 		ctx->nocase = 1;
@@ -1362,6 +1458,13 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			}
 		}
 		break;
+	case Opt_tcp_nodelay:
+		/* tcp nodelay should not usually be needed since we CORK/UNCORK the socket */
+		if (result.negated)
+			ctx->sockopt_tcp_nodelay = false;
+		else
+			ctx->sockopt_tcp_nodelay = true;
+		break;
 	case Opt_domainauto:
 		ctx->domainauto = true;
 		break;
@@ -1374,6 +1477,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	return 0;
 
  cifs_parse_mount_err:
+	kfree_sensitive(ctx->password);
 	return -EINVAL;
 }
 
@@ -1386,6 +1490,8 @@ int smb3_init_fs_context(struct fs_context *fc)
 	ctx = kzalloc(sizeof(struct smb3_fs_context), GFP_KERNEL);
 	if (unlikely(!ctx))
 		return -ENOMEM;
+
+	strscpy(ctx->workstation_name, nodename, sizeof(ctx->workstation_name));
 
 	/*
 	 * does not have to be perfect mapping since field is
@@ -1431,6 +1537,7 @@ int smb3_init_fs_context(struct fs_context *fc)
 
 	ctx->acregmax = CIFS_DEF_ACTIMEO;
 	ctx->acdirmax = CIFS_DEF_ACTIMEO;
+	ctx->closetimeo = SMB3_DEF_DCLOSETIMEO;
 
 	/* Most clients set timeout to 0, allows server to use its default */
 	ctx->handle_timeout = 0; /* See MS-SMB2 spec section 2.2.14.2.12 */
@@ -1475,6 +1582,8 @@ smb3_cleanup_fs_context_contents(struct smb3_fs_context *ctx)
 	ctx->username = NULL;
 	kfree_sensitive(ctx->password);
 	ctx->password = NULL;
+	kfree(ctx->server_hostname);
+	ctx->server_hostname = NULL;
 	kfree(ctx->UNC);
 	ctx->UNC = NULL;
 	kfree(ctx->source);

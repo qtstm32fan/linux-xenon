@@ -152,14 +152,13 @@ extern int driver_add_groups(struct device_driver *drv,
 			     const struct attribute_group **groups);
 extern void driver_remove_groups(struct device_driver *drv,
 				 const struct attribute_group **groups);
-int device_driver_attach(struct device_driver *drv, struct device *dev);
 void device_driver_detach(struct device *dev);
-
-extern char *make_class_name(const char *name, struct kobject *kobj);
 
 extern int devres_release_all(struct device *dev);
 extern void device_block_probing(void);
 extern void device_unblock_probing(void);
+extern void deferred_probe_extend_timeout(void);
+extern void driver_deferred_probe_trigger(void);
 
 /* /sys/devices directory */
 extern struct kset *devices_kset;
@@ -203,3 +202,6 @@ int devtmpfs_delete_node(struct device *dev);
 static inline int devtmpfs_create_node(struct device *dev) { return 0; }
 static inline int devtmpfs_delete_node(struct device *dev) { return 0; }
 #endif
+
+void software_node_notify(struct device *dev);
+void software_node_notify_remove(struct device *dev);

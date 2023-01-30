@@ -853,10 +853,10 @@ stop_reset:
 	sh_msiof_spi_stop(p, rx);
 stop_dma:
 	if (tx)
-		dmaengine_terminate_all(p->ctlr->dma_tx);
+		dmaengine_terminate_sync(p->ctlr->dma_tx);
 no_dma_tx:
 	if (rx)
-		dmaengine_terminate_all(p->ctlr->dma_rx);
+		dmaengine_terminate_sync(p->ctlr->dma_rx);
 	sh_msiof_write(p, SIIER, 0);
 	return ret;
 }
@@ -1085,6 +1085,7 @@ static const struct of_device_id sh_msiof_match[] = {
 	{ .compatible = "renesas,rcar-gen2-msiof", .data = &rcar_gen2_data },
 	{ .compatible = "renesas,msiof-r8a7796",   .data = &rcar_gen3_data },
 	{ .compatible = "renesas,rcar-gen3-msiof", .data = &rcar_gen3_data },
+	{ .compatible = "renesas,rcar-gen4-msiof", .data = &rcar_gen3_data },
 	{ .compatible = "renesas,sh-msiof",        .data = &sh_data }, /* Deprecated */
 	{},
 };
@@ -1426,4 +1427,3 @@ module_platform_driver(sh_msiof_spi_drv);
 MODULE_DESCRIPTION("SuperH MSIOF SPI Controller Interface Driver");
 MODULE_AUTHOR("Magnus Damm");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:spi_sh_msiof");

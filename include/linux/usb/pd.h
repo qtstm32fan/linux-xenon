@@ -460,7 +460,7 @@ static inline unsigned int rdo_max_power(u32 rdo)
 #define PD_T_RECEIVER_RESPONSE	15	/* 15ms max */
 #define PD_T_SOURCE_ACTIVITY	45
 #define PD_T_SINK_ACTIVITY	135
-#define PD_T_SINK_WAIT_CAP	240
+#define PD_T_SINK_WAIT_CAP	310	/* 310 - 620 ms */
 #define PD_T_PS_TRANSITION	500
 #define PD_T_SRC_TRANSITION	35
 #define PD_T_DRP_SNK		40
@@ -494,5 +494,43 @@ static inline unsigned int rdo_max_power(u32 rdo)
 #define PD_N_HARD_RESET_COUNT	2
 
 #define PD_P_SNK_STDBY_MW	2500	/* 2500 mW */
+
+#if IS_ENABLED(CONFIG_TYPEC)
+
+struct usb_power_delivery;
+
+/**
+ * usb_power_delivery_desc - USB Power Delivery Descriptor
+ * @revision: USB Power Delivery Specification Revision
+ * @version: USB Power Delivery Specicication Version - optional
+ */
+struct usb_power_delivery_desc {
+	u16 revision;
+	u16 version;
+};
+
+/**
+ * usb_power_delivery_capabilities_desc - Description of USB Power Delivery Capabilities Message
+ * @pdo: The Power Data Objects in the Capability Message
+ * @role: Power role of the capabilities
+ */
+struct usb_power_delivery_capabilities_desc {
+	u32 pdo[PDO_MAX_OBJECTS];
+	enum typec_role role;
+};
+
+struct usb_power_delivery_capabilities *
+usb_power_delivery_register_capabilities(struct usb_power_delivery *pd,
+					 struct usb_power_delivery_capabilities_desc *desc);
+void usb_power_delivery_unregister_capabilities(struct usb_power_delivery_capabilities *cap);
+
+struct usb_power_delivery *usb_power_delivery_register(struct device *parent,
+						       struct usb_power_delivery_desc *desc);
+void usb_power_delivery_unregister(struct usb_power_delivery *pd);
+
+int usb_power_delivery_link_device(struct usb_power_delivery *pd, struct device *dev);
+void usb_power_delivery_unlink_device(struct usb_power_delivery *pd, struct device *dev);
+
+#endif /* CONFIG_TYPEC */
 
 #endif /* __LINUX_USB_PD_H */

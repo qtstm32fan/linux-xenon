@@ -759,7 +759,7 @@ enum ionic_txq_desc_opcode {
  *                   IONIC_TXQ_DESC_OPCODE_CSUM_HW:
  *                      Offload 16-bit checksum computation to hardware.
  *                      If @csum_l3 is set then the packet's L3 checksum is
- *                      updated. Similarly, if @csum_l4 is set the the L4
+ *                      updated. Similarly, if @csum_l4 is set the L4
  *                      checksum is updated. If @encap is set then encap header
  *                      checksums are also updated.
  *
@@ -1368,9 +1368,9 @@ union ionic_port_config {
  * @status:             link status (enum ionic_port_oper_status)
  * @id:                 port id
  * @speed:              link speed (in Mbps)
- * @link_down_count:    number of times link went from from up to down
+ * @link_down_count:    number of times link went from up to down
  * @fec_type:           fec type (enum ionic_port_fec_type)
- * @xcvr:               tranceiver status
+ * @xcvr:               transceiver status
  */
 struct ionic_port_status {
 	__le32 id;
@@ -2936,6 +2936,8 @@ struct ionic_hwstamp_regs {
  * @asic_type:       Asic type
  * @asic_rev:        Asic revision
  * @fw_status:       Firmware status
+ *			bit 0   - 1 = fw running
+ *			bit 4-7 - 4 bit generation number, changes on fw restart
  * @fw_heartbeat:    Firmware heartbeat counter
  * @serial_num:      Serial number
  * @fw_version:      Firmware version
@@ -2949,7 +2951,8 @@ union ionic_dev_info_regs {
 		u8     version;
 		u8     asic_type;
 		u8     asic_rev;
-#define IONIC_FW_STS_F_RUNNING	0x1
+#define IONIC_FW_STS_F_RUNNING		0x01
+#define IONIC_FW_STS_F_GENERATION	0xF0
 		u8     fw_status;
 		u32    fw_heartbeat;
 		char   fw_version[IONIC_DEVINFO_FWVERS_BUFLEN];

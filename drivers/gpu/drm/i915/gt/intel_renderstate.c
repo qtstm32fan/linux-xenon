@@ -3,6 +3,8 @@
  * Copyright © 2014 Intel Corporation
  */
 
+#include "gem/i915_gem_internal.h"
+
 #include "i915_drv.h"
 #include "intel_renderstate.h"
 #include "intel_context.h"
@@ -15,7 +17,7 @@ render_state_get_rodata(const struct intel_engine_cs *engine)
 	if (engine->class != RENDER_CLASS)
 		return NULL;
 
-	switch (INTEL_GEN(engine->i915)) {
+	switch (GRAPHICS_VER(engine->i915)) {
 	case 6:
 		return &gen6_null_state;
 	case 7:

@@ -308,13 +308,14 @@ static int ti_open(struct tty_struct *tty, struct usb_serial_port *port);
 static void ti_close(struct usb_serial_port *port);
 static int ti_write(struct tty_struct *tty, struct usb_serial_port *port,
 		const unsigned char *data, int count);
-static int ti_write_room(struct tty_struct *tty);
-static int ti_chars_in_buffer(struct tty_struct *tty);
+static unsigned int ti_write_room(struct tty_struct *tty);
+static unsigned int ti_chars_in_buffer(struct tty_struct *tty);
 static bool ti_tx_empty(struct usb_serial_port *port);
 static void ti_throttle(struct tty_struct *tty);
 static void ti_unthrottle(struct tty_struct *tty);
 static void ti_set_termios(struct tty_struct *tty,
-		struct usb_serial_port *port, struct ktermios *old_termios);
+			   struct usb_serial_port *port,
+			   const struct ktermios *old_termios);
 static int ti_tiocmget(struct tty_struct *tty);
 static int ti_tiocmset(struct tty_struct *tty,
 		unsigned int set, unsigned int clear);
@@ -813,34 +814,34 @@ static int ti_write(struct tty_struct *tty, struct usb_serial_port *port,
 }
 
 
-static int ti_write_room(struct tty_struct *tty)
+static unsigned int ti_write_room(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct ti_port *tport = usb_get_serial_port_data(port);
-	int room = 0;
+	unsigned int room;
 	unsigned long flags;
 
 	spin_lock_irqsave(&tport->tp_lock, flags);
 	room = kfifo_avail(&port->write_fifo);
 	spin_unlock_irqrestore(&tport->tp_lock, flags);
 
-	dev_dbg(&port->dev, "%s - returns %d\n", __func__, room);
+	dev_dbg(&port->dev, "%s - returns %u\n", __func__, room);
 	return room;
 }
 
 
-static int ti_chars_in_buffer(struct tty_struct *tty)
+static unsigned int ti_chars_in_buffer(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct ti_port *tport = usb_get_serial_port_data(port);
-	int chars = 0;
+	unsigned int chars;
 	unsigned long flags;
 
 	spin_lock_irqsave(&tport->tp_lock, flags);
 	chars = kfifo_len(&port->write_fifo);
 	spin_unlock_irqrestore(&tport->tp_lock, flags);
 
-	dev_dbg(&port->dev, "%s - returns %d\n", __func__, chars);
+	dev_dbg(&port->dev, "%s - returns %u\n", __func__, chars);
 	return chars;
 }
 
@@ -892,7 +893,8 @@ static void ti_unthrottle(struct tty_struct *tty)
 }
 
 static void ti_set_termios(struct tty_struct *tty,
-		struct usb_serial_port *port, struct ktermios *old_termios)
+			   struct usb_serial_port *port,
+			   const struct ktermios *old_termios)
 {
 	struct ti_port *tport = usb_get_serial_port_data(port);
 	struct ti_uart_config *config;

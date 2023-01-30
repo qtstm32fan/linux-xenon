@@ -18,11 +18,11 @@
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
 
+#include <drm/display/drm_dp_helper.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_dp_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
@@ -537,6 +537,7 @@ static int anx6345_bridge_attach(struct drm_bridge *bridge,
 	/* Register aux channel */
 	anx6345->aux.name = "DP-AUX";
 	anx6345->aux.dev = &anx6345->client->dev;
+	anx6345->aux.drm_dev = bridge->dev;
 	anx6345->aux.transfer = anx6345_aux_transfer;
 
 	err = drm_dp_aux_register(&anx6345->aux);
@@ -786,7 +787,7 @@ err_unregister_i2c:
 	return err;
 }
 
-static int anx6345_i2c_remove(struct i2c_client *client)
+static void anx6345_i2c_remove(struct i2c_client *client)
 {
 	struct anx6345 *anx6345 = i2c_get_clientdata(client);
 
@@ -797,8 +798,6 @@ static int anx6345_i2c_remove(struct i2c_client *client)
 	kfree(anx6345->edid);
 
 	mutex_destroy(&anx6345->lock);
-
-	return 0;
 }
 
 static const struct i2c_device_id anx6345_id[] = {

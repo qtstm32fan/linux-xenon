@@ -72,6 +72,9 @@ static struct config_group target_core_hbagroup;
 static struct config_group alua_group;
 static struct config_group alua_lu_gps_group;
 
+static unsigned int target_devices;
+static DEFINE_MUTEX(target_devices_lock);
+
 static inline struct se_hba *
 item_to_hba(struct config_item *item)
 {
@@ -105,51 +108,48 @@ static ssize_t target_core_item_dbroot_store(struct config_item *item,
 {
 	ssize_t read_bytes;
 	struct file *fp;
+	ssize_t r = -EINVAL;
 
-	mutex_lock(&g_tf_lock);
-	if (!list_empty(&g_tf_list)) {
-		mutex_unlock(&g_tf_lock);
-		pr_err("db_root: cannot be changed: target drivers registered");
-		return -EINVAL;
+	mutex_lock(&target_devices_lock);
+	if (target_devices) {
+		pr_err("db_root: cannot be changed because it's in use\n");
+		goto unlock;
 	}
 
 	if (count > (DB_ROOT_LEN - 1)) {
-		mutex_unlock(&g_tf_lock);
 		pr_err("db_root: count %d exceeds DB_ROOT_LEN-1: %u\n",
 		       (int)count, DB_ROOT_LEN - 1);
-		return -EINVAL;
+		goto unlock;
 	}
 
 	read_bytes = snprintf(db_root_stage, DB_ROOT_LEN, "%s", page);
-	if (!read_bytes) {
-		mutex_unlock(&g_tf_lock);
-		return -EINVAL;
-	}
+	if (!read_bytes)
+		goto unlock;
+
 	if (db_root_stage[read_bytes - 1] == '\n')
 		db_root_stage[read_bytes - 1] = '\0';
 
 	/* validate new db root before accepting it */
 	fp = filp_open(db_root_stage, O_RDONLY, 0);
 	if (IS_ERR(fp)) {
-		mutex_unlock(&g_tf_lock);
 		pr_err("db_root: cannot open: %s\n", db_root_stage);
-		return -EINVAL;
+		goto unlock;
 	}
 	if (!S_ISDIR(file_inode(fp)->i_mode)) {
 		filp_close(fp, NULL);
-		mutex_unlock(&g_tf_lock);
 		pr_err("db_root: not a directory: %s\n", db_root_stage);
-		return -EINVAL;
+		goto unlock;
 	}
 	filp_close(fp, NULL);
 
 	strncpy(db_root, db_root_stage, read_bytes);
-
-	mutex_unlock(&g_tf_lock);
-
 	pr_debug("Target_Core_ConfigFS: db_root set to %s\n", db_root);
 
-	return read_bytes;
+	r = read_bytes;
+
+unlock:
+	mutex_unlock(&target_devices_lock);
+	return r;
 }
 
 CONFIGFS_ATTR(target_core_item_, dbroot);
@@ -490,6 +490,7 @@ void target_unregister_template(const struct target_core_fabric_ops *fo)
 			 * fabric driver unload of TFO->module to proceed.
 			 */
 			rcu_barrier();
+			kfree(t->tf_tpg_base_cit.ct_attrs);
 			kfree(t);
 			return;
 		}
@@ -731,6 +732,7 @@ static ssize_t emulate_tpu_store(struct config_item *item,
 		const char *page, size_t count)
 {
 	struct se_dev_attrib *da = to_attrib(item);
+	struct se_device *dev = da->da_dev;
 	bool flag;
 	int ret;
 
@@ -743,8 +745,11 @@ static ssize_t emulate_tpu_store(struct config_item *item,
 	 * Discard supported is detected iblock_create_virtdevice().
 	 */
 	if (flag && !da->max_unmap_block_desc_count) {
-		pr_err("Generic Block Discard not supported\n");
-		return -ENOSYS;
+		if (!dev->transport->configure_unmap ||
+		    !dev->transport->configure_unmap(dev)) {
+			pr_err("Generic Block Discard not supported\n");
+			return -ENOSYS;
+		}
 	}
 
 	da->emulate_tpu = flag;
@@ -757,6 +762,7 @@ static ssize_t emulate_tpws_store(struct config_item *item,
 		const char *page, size_t count)
 {
 	struct se_dev_attrib *da = to_attrib(item);
+	struct se_device *dev = da->da_dev;
 	bool flag;
 	int ret;
 
@@ -769,8 +775,11 @@ static ssize_t emulate_tpws_store(struct config_item *item,
 	 * Discard supported is detected iblock_create_virtdevice().
 	 */
 	if (flag && !da->max_unmap_block_desc_count) {
-		pr_err("Generic Block Discard not supported\n");
-		return -ENOSYS;
+		if (!dev->transport->configure_unmap ||
+		    !dev->transport->configure_unmap(dev)) {
+			pr_err("Generic Block Discard not supported\n");
+			return -ENOSYS;
+		}
 	}
 
 	da->emulate_tpws = flag;
@@ -963,6 +972,7 @@ static ssize_t unmap_zeroes_data_store(struct config_item *item,
 		const char *page, size_t count)
 {
 	struct se_dev_attrib *da = to_attrib(item);
+	struct se_device *dev = da->da_dev;
 	bool flag;
 	int ret;
 
@@ -981,10 +991,12 @@ static ssize_t unmap_zeroes_data_store(struct config_item *item,
 	 * Discard supported is detected iblock_configure_device().
 	 */
 	if (flag && !da->max_unmap_block_desc_count) {
-		pr_err("dev[%p]: Thin Provisioning LBPRZ will not be set"
-		       " because max_unmap_block_desc_count is zero\n",
-		       da->da_dev);
-		return -ENOSYS;
+		if (!dev->transport->configure_unmap ||
+		    !dev->transport->configure_unmap(dev)) {
+			pr_err("dev[%p]: Thin Provisioning LBPRZ will not be set because max_unmap_block_desc_count is zero\n",
+			       da->da_dev);
+			return -ENOSYS;
+		}
 	}
 	da->unmap_zeroes_data = flag;
 	pr_debug("dev[%p]: SE Device Thin Provisioning LBPRZ bit: %d\n",
@@ -1110,19 +1122,23 @@ static ssize_t alua_support_store(struct config_item *item,
 {
 	struct se_dev_attrib *da = to_attrib(item);
 	struct se_device *dev = da->da_dev;
-	bool flag;
+	bool flag, oldflag;
 	int ret;
+
+	ret = strtobool(page, &flag);
+	if (ret < 0)
+		return ret;
+
+	oldflag = !(dev->transport_flags & TRANSPORT_FLAG_PASSTHROUGH_ALUA);
+	if (flag == oldflag)
+		return count;
 
 	if (!(dev->transport->transport_flags_changeable &
 	      TRANSPORT_FLAG_PASSTHROUGH_ALUA)) {
 		pr_err("dev[%p]: Unable to change SE Device alua_support:"
 			" alua_support has fixed value\n", dev);
-		return -EINVAL;
+		return -ENOSYS;
 	}
-
-	ret = strtobool(page, &flag);
-	if (ret < 0)
-		return ret;
 
 	if (flag)
 		dev->transport_flags &= ~TRANSPORT_FLAG_PASSTHROUGH_ALUA;
@@ -1145,19 +1161,23 @@ static ssize_t pgr_support_store(struct config_item *item,
 {
 	struct se_dev_attrib *da = to_attrib(item);
 	struct se_device *dev = da->da_dev;
-	bool flag;
+	bool flag, oldflag;
 	int ret;
+
+	ret = strtobool(page, &flag);
+	if (ret < 0)
+		return ret;
+
+	oldflag = !(dev->transport_flags & TRANSPORT_FLAG_PASSTHROUGH_PGR);
+	if (flag == oldflag)
+		return count;
 
 	if (!(dev->transport->transport_flags_changeable &
 	      TRANSPORT_FLAG_PASSTHROUGH_PGR)) {
 		pr_err("dev[%p]: Unable to change SE Device pgr_support:"
 			" pgr_support has fixed value\n", dev);
-		return -EINVAL;
+		return -ENOSYS;
 	}
-
-	ret = strtobool(page, &flag);
-	if (ret < 0)
-		return ret;
 
 	if (flag)
 		dev->transport_flags &= ~TRANSPORT_FLAG_PASSTHROUGH_PGR;
@@ -1479,6 +1499,54 @@ static ssize_t target_wwn_revision_store(struct config_item *item,
 	return count;
 }
 
+static ssize_t
+target_wwn_company_id_show(struct config_item *item,
+				char *page)
+{
+	return snprintf(page, PAGE_SIZE, "%#08x\n",
+			to_t10_wwn(item)->company_id);
+}
+
+static ssize_t
+target_wwn_company_id_store(struct config_item *item,
+				 const char *page, size_t count)
+{
+	struct t10_wwn *t10_wwn = to_t10_wwn(item);
+	struct se_device *dev = t10_wwn->t10_dev;
+	u32 val;
+	int ret;
+
+	/*
+	 * The IEEE COMPANY_ID field should contain a 24-bit canonical
+	 * form OUI assigned by the IEEE.
+	 */
+	ret = kstrtou32(page, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	if (val >= 0x1000000)
+		return -EOVERFLOW;
+
+	/*
+	 * Check to see if any active exports exist. If they do exist, fail
+	 * here as changing this information on the fly (underneath the
+	 * initiator side OS dependent multipath code) could cause negative
+	 * effects.
+	 */
+	if (dev->export_count) {
+		pr_err("Unable to set Company ID while %u exports exist\n",
+		       dev->export_count);
+		return -EINVAL;
+	}
+
+	t10_wwn->company_id = val;
+
+	pr_debug("Target_Core_ConfigFS: Set IEEE Company ID: %#08x\n",
+		 t10_wwn->company_id);
+
+	return count;
+}
+
 /*
  * VPD page 0x80 Unit serial
  */
@@ -1625,6 +1693,7 @@ DEF_DEV_WWN_ASSOC_SHOW(vpd_assoc_scsi_target_device, 0x20);
 CONFIGFS_ATTR(target_wwn_, vendor_id);
 CONFIGFS_ATTR(target_wwn_, product_id);
 CONFIGFS_ATTR(target_wwn_, revision);
+CONFIGFS_ATTR(target_wwn_, company_id);
 CONFIGFS_ATTR(target_wwn_, vpd_unit_serial);
 CONFIGFS_ATTR_RO(target_wwn_, vpd_protocol_identifier);
 CONFIGFS_ATTR_RO(target_wwn_, vpd_assoc_logical_unit);
@@ -1635,6 +1704,7 @@ static struct configfs_attribute *target_core_dev_wwn_attrs[] = {
 	&target_wwn_attr_vendor_id,
 	&target_wwn_attr_product_id,
 	&target_wwn_attr_revision,
+	&target_wwn_attr_company_id,
 	&target_wwn_attr_vpd_unit_serial,
 	&target_wwn_attr_vpd_protocol_identifier,
 	&target_wwn_attr_vpd_assoc_logical_unit,
@@ -3257,6 +3327,10 @@ static struct config_group *target_core_make_subdev(
 	 */
 	target_stat_setup_dev_default_groups(dev);
 
+	mutex_lock(&target_devices_lock);
+	target_devices++;
+	mutex_unlock(&target_devices_lock);
+
 	mutex_unlock(&hba->hba_access_mutex);
 	return &dev->dev_group;
 
@@ -3295,6 +3369,11 @@ static void target_core_drop_subdev(
 	 * se_dev is released from target_core_dev_item_ops->release()
 	 */
 	config_item_put(item);
+
+	mutex_lock(&target_devices_lock);
+	target_devices--;
+	mutex_unlock(&target_devices_lock);
+
 	mutex_unlock(&hba->hba_access_mutex);
 }
 

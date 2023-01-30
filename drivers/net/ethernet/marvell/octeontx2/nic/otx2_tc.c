@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Physcial Function ethernet driver
+/* Marvell RVU Ethernet driver
  *
  * Copyright (C) 2021 Marvell.
+ *
  */
+
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/inetdevice.h>
@@ -15,6 +17,7 @@
 #include <net/tc_act/tc_vlan.h>
 #include <net/ipv6.h>
 
+#include "cn10k.h"
 #include "otx2_common.h"
 
 /* Egress rate limiting definitions */
@@ -25,12 +28,18 @@
 #define MAX_RATE_EXPONENT		0x0FULL
 #define MAX_RATE_MANTISSA		0xFFULL
 
+#define CN10K_MAX_BURST_MANTISSA	0x7FFFULL
+#define CN10K_MAX_BURST_SIZE		8453888ULL
+
 /* Bitfields in NIX_TLX_PIR register */
 #define TLX_RATE_MANTISSA		GENMASK_ULL(8, 1)
 #define TLX_RATE_EXPONENT		GENMASK_ULL(12, 9)
 #define TLX_RATE_DIVIDER_EXPONENT	GENMASK_ULL(16, 13)
 #define TLX_BURST_MANTISSA		GENMASK_ULL(36, 29)
 #define TLX_BURST_EXPONENT		GENMASK_ULL(40, 37)
+
+#define CN10K_TLX_BURST_MANTISSA	GENMASK_ULL(43, 29)
+#define CN10K_TLX_BURST_EXPONENT	GENMASK_ULL(47, 44)
 
 struct otx2_tc_flow_stats {
 	u64 bytes;
@@ -41,40 +50,75 @@ struct otx2_tc_flow_stats {
 struct otx2_tc_flow {
 	struct rhash_head		node;
 	unsigned long			cookie;
-	u16				entry;
 	unsigned int			bitpos;
 	struct rcu_head			rcu;
 	struct otx2_tc_flow_stats	stats;
 	spinlock_t			lock; /* lock for stats */
+	u16				rq;
+	u16				entry;
+	u16				leaf_profile;
+	bool				is_act_police;
 };
 
-static void otx2_get_egress_burst_cfg(u32 burst, u32 *burst_exp,
-				      u32 *burst_mantissa)
+int otx2_tc_alloc_ent_bitmap(struct otx2_nic *nic)
 {
+	struct otx2_tc_info *tc = &nic->tc_info;
+
+	if (!nic->flow_cfg->max_flows)
+		return 0;
+
+	/* Max flows changed, free the existing bitmap */
+	kfree(tc->tc_entries_bitmap);
+
+	tc->tc_entries_bitmap =
+			kcalloc(BITS_TO_LONGS(nic->flow_cfg->max_flows),
+				sizeof(long), GFP_KERNEL);
+	if (!tc->tc_entries_bitmap) {
+		netdev_err(nic->netdev,
+			   "Unable to alloc TC flow entries bitmap\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(otx2_tc_alloc_ent_bitmap);
+
+static void otx2_get_egress_burst_cfg(struct otx2_nic *nic, u32 burst,
+				      u32 *burst_exp, u32 *burst_mantissa)
+{
+	int max_burst, max_mantissa;
 	unsigned int tmp;
+
+	if (is_dev_otx2(nic->pdev)) {
+		max_burst = MAX_BURST_SIZE;
+		max_mantissa = MAX_BURST_MANTISSA;
+	} else {
+		max_burst = CN10K_MAX_BURST_SIZE;
+		max_mantissa = CN10K_MAX_BURST_MANTISSA;
+	}
 
 	/* Burst is calculated as
 	 * ((256 + BURST_MANTISSA) << (1 + BURST_EXPONENT)) / 256
 	 * Max supported burst size is 130,816 bytes.
 	 */
-	burst = min_t(u32, burst, MAX_BURST_SIZE);
+	burst = min_t(u32, burst, max_burst);
 	if (burst) {
 		*burst_exp = ilog2(burst) ? ilog2(burst) - 1 : 0;
 		tmp = burst - rounddown_pow_of_two(burst);
-		if (burst < MAX_BURST_MANTISSA)
+		if (burst < max_mantissa)
 			*burst_mantissa = tmp * 2;
 		else
 			*burst_mantissa = tmp / (1ULL << (*burst_exp - 7));
 	} else {
 		*burst_exp = MAX_BURST_EXPONENT;
-		*burst_mantissa = MAX_BURST_MANTISSA;
+		*burst_mantissa = max_mantissa;
 	}
 }
 
-static void otx2_get_egress_rate_cfg(u32 maxrate, u32 *exp,
+static void otx2_get_egress_rate_cfg(u64 maxrate, u32 *exp,
 				     u32 *mantissa, u32 *div_exp)
 {
-	unsigned int tmp;
+	u64 tmp;
 
 	/* Rate calculation by hardware
 	 *
@@ -103,20 +147,43 @@ static void otx2_get_egress_rate_cfg(u32 maxrate, u32 *exp,
 	}
 }
 
-static int otx2_set_matchall_egress_rate(struct otx2_nic *nic, u32 burst, u32 maxrate)
+static u64 otx2_get_txschq_rate_regval(struct otx2_nic *nic,
+				       u64 maxrate, u32 burst)
+{
+	u32 burst_exp, burst_mantissa;
+	u32 exp, mantissa, div_exp;
+	u64 regval = 0;
+
+	/* Get exponent and mantissa values from the desired rate */
+	otx2_get_egress_burst_cfg(nic, burst, &burst_exp, &burst_mantissa);
+	otx2_get_egress_rate_cfg(maxrate, &exp, &mantissa, &div_exp);
+
+	if (is_dev_otx2(nic->pdev)) {
+		regval = FIELD_PREP(TLX_BURST_EXPONENT, (u64)burst_exp) |
+				FIELD_PREP(TLX_BURST_MANTISSA, (u64)burst_mantissa) |
+				FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
+				FIELD_PREP(TLX_RATE_EXPONENT, exp) |
+				FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	} else {
+		regval = FIELD_PREP(CN10K_TLX_BURST_EXPONENT, (u64)burst_exp) |
+				FIELD_PREP(CN10K_TLX_BURST_MANTISSA, (u64)burst_mantissa) |
+				FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
+				FIELD_PREP(TLX_RATE_EXPONENT, exp) |
+				FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	}
+
+	return regval;
+}
+
+static int otx2_set_matchall_egress_rate(struct otx2_nic *nic,
+					 u32 burst, u64 maxrate)
 {
 	struct otx2_hw *hw = &nic->hw;
 	struct nix_txschq_config *req;
-	u32 burst_exp, burst_mantissa;
-	u32 exp, mantissa, div_exp;
 	int txschq, err;
 
 	/* All SQs share the same TL4, so pick the first scheduler */
 	txschq = hw->txschq_list[NIX_TXSCH_LVL_TL4][0];
-
-	/* Get exponent and mantissa values from the desired rate */
-	otx2_get_egress_burst_cfg(burst, &burst_exp, &burst_mantissa);
-	otx2_get_egress_rate_cfg(maxrate, &exp, &mantissa, &div_exp);
 
 	mutex_lock(&nic->mbox.lock);
 	req = otx2_mbox_alloc_msg_nix_txschq_cfg(&nic->mbox);
@@ -128,11 +195,7 @@ static int otx2_set_matchall_egress_rate(struct otx2_nic *nic, u32 burst, u32 ma
 	req->lvl = NIX_TXSCH_LVL_TL4;
 	req->num_regs = 1;
 	req->reg[0] = NIX_AF_TL4X_PIR(txschq);
-	req->regval[0] = FIELD_PREP(TLX_BURST_EXPONENT, burst_exp) |
-			 FIELD_PREP(TLX_BURST_MANTISSA, burst_mantissa) |
-			 FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
-			 FIELD_PREP(TLX_RATE_EXPONENT, exp) |
-			 FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	req->regval[0] = otx2_get_txschq_rate_regval(nic, maxrate, burst);
 
 	err = otx2_sync_mbox_msg(&nic->mbox);
 	mutex_unlock(&nic->mbox.lock);
@@ -161,13 +224,47 @@ static int otx2_tc_validate_flow(struct otx2_nic *nic,
 	return 0;
 }
 
+static int otx2_policer_validate(const struct flow_action *action,
+				 const struct flow_action_entry *act,
+				 struct netlink_ext_ack *extack)
+{
+	if (act->police.exceed.act_id != FLOW_ACTION_DROP) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Offload not supported when exceed action is not drop");
+		return -EOPNOTSUPP;
+	}
+
+	if (act->police.notexceed.act_id != FLOW_ACTION_PIPE &&
+	    act->police.notexceed.act_id != FLOW_ACTION_ACCEPT) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Offload not supported when conform action is not pipe or ok");
+		return -EOPNOTSUPP;
+	}
+
+	if (act->police.notexceed.act_id == FLOW_ACTION_ACCEPT &&
+	    !flow_action_is_last_entry(action, act)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Offload not supported when conform action is ok, but action is not last");
+		return -EOPNOTSUPP;
+	}
+
+	if (act->police.peakrate_bytes_ps ||
+	    act->police.avrate || act->police.overhead) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Offload not supported when peakrate/avrate/overhead is configured");
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
 static int otx2_tc_egress_matchall_install(struct otx2_nic *nic,
 					   struct tc_cls_matchall_offload *cls)
 {
 	struct netlink_ext_ack *extack = cls->common.extack;
 	struct flow_action *actions = &cls->rule->action;
 	struct flow_action_entry *entry;
-	u32 rate;
+	u64 rate;
 	int err;
 
 	err = otx2_tc_validate_flow(nic, actions, extack);
@@ -183,13 +280,17 @@ static int otx2_tc_egress_matchall_install(struct otx2_nic *nic,
 	entry = &cls->rule->action.entries[0];
 	switch (entry->id) {
 	case FLOW_ACTION_POLICE:
+		err = otx2_policer_validate(&cls->rule->action, entry, extack);
+		if (err)
+			return err;
+
 		if (entry->police.rate_pkt_ps) {
 			NL_SET_ERR_MSG_MOD(extack, "QoS offload not support packets per second");
 			return -EOPNOTSUPP;
 		}
 		/* Convert bytes per second to Mbps */
 		rate = entry->police.rate_bytes_ps * 8;
-		rate = max_t(u32, rate / 1000000, 1);
+		rate = max_t(u64, rate / 1000000, 1);
 		err = otx2_set_matchall_egress_rate(nic, entry->police.burst, rate);
 		if (err)
 			return err;
@@ -220,17 +321,77 @@ static int otx2_tc_egress_matchall_delete(struct otx2_nic *nic,
 	return err;
 }
 
+static int otx2_tc_act_set_police(struct otx2_nic *nic,
+				  struct otx2_tc_flow *node,
+				  struct flow_cls_offload *f,
+				  u64 rate, u32 burst, u32 mark,
+				  struct npc_install_flow_req *req, bool pps)
+{
+	struct netlink_ext_ack *extack = f->common.extack;
+	struct otx2_hw *hw = &nic->hw;
+	int rq_idx, rc;
+
+	rq_idx = find_first_zero_bit(&nic->rq_bmap, hw->rx_queues);
+	if (rq_idx >= hw->rx_queues) {
+		NL_SET_ERR_MSG_MOD(extack, "Police action rules exceeded");
+		return -EINVAL;
+	}
+
+	mutex_lock(&nic->mbox.lock);
+
+	rc = cn10k_alloc_leaf_profile(nic, &node->leaf_profile);
+	if (rc) {
+		mutex_unlock(&nic->mbox.lock);
+		return rc;
+	}
+
+	rc = cn10k_set_ipolicer_rate(nic, node->leaf_profile, burst, rate, pps);
+	if (rc)
+		goto free_leaf;
+
+	rc = cn10k_map_unmap_rq_policer(nic, rq_idx, node->leaf_profile, true);
+	if (rc)
+		goto free_leaf;
+
+	mutex_unlock(&nic->mbox.lock);
+
+	req->match_id = mark & 0xFFFFULL;
+	req->index = rq_idx;
+	req->op = NIX_RX_ACTIONOP_UCAST;
+	set_bit(rq_idx, &nic->rq_bmap);
+	node->is_act_police = true;
+	node->rq = rq_idx;
+
+	return 0;
+
+free_leaf:
+	if (cn10k_free_leaf_profile(nic, node->leaf_profile))
+		netdev_err(nic->netdev,
+			   "Unable to free leaf bandwidth profile(%d)\n",
+			   node->leaf_profile);
+	mutex_unlock(&nic->mbox.lock);
+	return rc;
+}
+
 static int otx2_tc_parse_actions(struct otx2_nic *nic,
 				 struct flow_action *flow_action,
-				 struct npc_install_flow_req *req)
+				 struct npc_install_flow_req *req,
+				 struct flow_cls_offload *f,
+				 struct otx2_tc_flow *node)
 {
+	struct netlink_ext_ack *extack = f->common.extack;
 	struct flow_action_entry *act;
 	struct net_device *target;
 	struct otx2_nic *priv;
+	u32 burst, mark = 0;
+	u8 nr_police = 0;
+	bool pps = false;
+	u64 rate;
+	int err;
 	int i;
 
 	if (!flow_action_has_entries(flow_action)) {
-		netdev_info(nic->netdev, "no tc actions specified");
+		NL_SET_ERR_MSG_MOD(extack, "no tc actions specified");
 		return -EINVAL;
 	}
 
@@ -247,8 +408,8 @@ static int otx2_tc_parse_actions(struct otx2_nic *nic,
 			priv = netdev_priv(target);
 			/* npc_install_flow_req doesn't support passing a target pcifunc */
 			if (rvu_get_pf(nic->pcifunc) != rvu_get_pf(priv->pcifunc)) {
-				netdev_info(nic->netdev,
-					    "can't redirect to other pf/vf\n");
+				NL_SET_ERR_MSG_MOD(extack,
+						   "can't redirect to other pf/vf");
 				return -EOPNOTSUPP;
 			}
 			req->vf = priv->pcifunc & RVU_PFVF_FUNC_MASK;
@@ -259,18 +420,59 @@ static int otx2_tc_parse_actions(struct otx2_nic *nic,
 			/* use RX_VTAG_TYPE7 which is initialized to strip vlan tag */
 			req->vtag0_type = NIX_AF_LFX_RX_VTAG_TYPE7;
 			break;
+		case FLOW_ACTION_POLICE:
+			/* Ingress ratelimiting is not supported on OcteonTx2 */
+			if (is_dev_otx2(nic->pdev)) {
+				NL_SET_ERR_MSG_MOD(extack,
+					"Ingress policing not supported on this platform");
+				return -EOPNOTSUPP;
+			}
+
+			err = otx2_policer_validate(flow_action, act, extack);
+			if (err)
+				return err;
+
+			if (act->police.rate_bytes_ps > 0) {
+				rate = act->police.rate_bytes_ps * 8;
+				burst = act->police.burst;
+			} else if (act->police.rate_pkt_ps > 0) {
+				/* The algorithm used to calculate rate
+				 * mantissa, exponent values for a given token
+				 * rate (token can be byte or packet) requires
+				 * token rate to be mutiplied by 8.
+				 */
+				rate = act->police.rate_pkt_ps * 8;
+				burst = act->police.burst_pkt;
+				pps = true;
+			}
+			nr_police++;
+			break;
+		case FLOW_ACTION_MARK:
+			mark = act->mark;
+			break;
 		default:
 			return -EOPNOTSUPP;
 		}
 	}
 
+	if (nr_police > 1) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "rate limit police offload requires a single action");
+		return -EOPNOTSUPP;
+	}
+
+	if (nr_police)
+		return otx2_tc_act_set_police(nic, node, f, rate, burst,
+					      mark, req, pps);
+
 	return 0;
 }
 
-static int otx2_tc_prepare_flow(struct otx2_nic *nic,
+static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 				struct flow_cls_offload *f,
 				struct npc_install_flow_req *req)
 {
+	struct netlink_ext_ack *extack = f->common.extack;
 	struct flow_msg *flow_spec = &req->packet;
 	struct flow_msg *flow_mask = &req->mask;
 	struct flow_dissector *dissector;
@@ -335,7 +537,7 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic,
 
 		flow_rule_match_eth_addrs(rule, &match);
 		if (!is_zero_ether_addr(match.mask->src)) {
-			netdev_err(nic->netdev, "src mac match not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "src mac match not supported");
 			return -EOPNOTSUPP;
 		}
 
@@ -353,11 +555,11 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic,
 		flow_rule_match_ip(rule, &match);
 		if ((ntohs(flow_spec->etype) != ETH_P_IP) &&
 		    match.mask->tos) {
-			netdev_err(nic->netdev, "tos not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "tos not supported");
 			return -EOPNOTSUPP;
 		}
 		if (match.mask->ttl) {
-			netdev_err(nic->netdev, "ttl not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "ttl not supported");
 			return -EOPNOTSUPP;
 		}
 		flow_spec->tos = match.key->tos;
@@ -385,8 +587,8 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic,
 				   match.key->vlan_priority << 13;
 
 			vlan_tci_mask = match.mask->vlan_id |
-					match.key->vlan_dei << 12 |
-					match.key->vlan_priority << 13;
+					match.mask->vlan_dei << 12 |
+					match.mask->vlan_priority << 13;
 
 			flow_spec->vlan_tci = htons(vlan_tci);
 			flow_mask->vlan_tci = htons(vlan_tci_mask);
@@ -413,8 +615,8 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic,
 
 		if (ipv6_addr_loopback(&match.key->dst) ||
 		    ipv6_addr_loopback(&match.key->src)) {
-			netdev_err(nic->netdev,
-				   "Flow matching on IPv6 loopback addr is not supported\n");
+			NL_SET_ERR_MSG_MOD(extack,
+					   "Flow matching IPv6 loopback addr not supported");
 			return -EOPNOTSUPP;
 		}
 
@@ -446,24 +648,30 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic,
 
 		flow_spec->dport = match.key->dst;
 		flow_mask->dport = match.mask->dst;
-		if (ip_proto == IPPROTO_UDP)
-			req->features |= BIT_ULL(NPC_DPORT_UDP);
-		else if (ip_proto == IPPROTO_TCP)
-			req->features |= BIT_ULL(NPC_DPORT_TCP);
-		else if (ip_proto == IPPROTO_SCTP)
-			req->features |= BIT_ULL(NPC_DPORT_SCTP);
+
+		if (flow_mask->dport) {
+			if (ip_proto == IPPROTO_UDP)
+				req->features |= BIT_ULL(NPC_DPORT_UDP);
+			else if (ip_proto == IPPROTO_TCP)
+				req->features |= BIT_ULL(NPC_DPORT_TCP);
+			else if (ip_proto == IPPROTO_SCTP)
+				req->features |= BIT_ULL(NPC_DPORT_SCTP);
+		}
 
 		flow_spec->sport = match.key->src;
 		flow_mask->sport = match.mask->src;
-		if (ip_proto == IPPROTO_UDP)
-			req->features |= BIT_ULL(NPC_SPORT_UDP);
-		else if (ip_proto == IPPROTO_TCP)
-			req->features |= BIT_ULL(NPC_SPORT_TCP);
-		else if (ip_proto == IPPROTO_SCTP)
-			req->features |= BIT_ULL(NPC_SPORT_SCTP);
+
+		if (flow_mask->sport) {
+			if (ip_proto == IPPROTO_UDP)
+				req->features |= BIT_ULL(NPC_SPORT_UDP);
+			else if (ip_proto == IPPROTO_TCP)
+				req->features |= BIT_ULL(NPC_SPORT_TCP);
+			else if (ip_proto == IPPROTO_SCTP)
+				req->features |= BIT_ULL(NPC_SPORT_SCTP);
+		}
 	}
 
-	return otx2_tc_parse_actions(nic, &rule->action, req);
+	return otx2_tc_parse_actions(nic, &rule->action, req, f, node);
 }
 
 static int otx2_del_mcam_flow_entry(struct otx2_nic *nic, u16 entry)
@@ -496,8 +704,10 @@ static int otx2_del_mcam_flow_entry(struct otx2_nic *nic, u16 entry)
 static int otx2_tc_del_flow(struct otx2_nic *nic,
 			    struct flow_cls_offload *tc_flow_cmd)
 {
+	struct otx2_flow_config *flow_cfg = nic->flow_cfg;
 	struct otx2_tc_info *tc_info = &nic->tc_info;
 	struct otx2_tc_flow *flow_node;
+	int err;
 
 	flow_node = rhashtable_lookup_fast(&tc_info->flow_table,
 					   &tc_flow_cmd->cookie,
@@ -508,6 +718,27 @@ static int otx2_tc_del_flow(struct otx2_nic *nic,
 		return -EINVAL;
 	}
 
+	if (flow_node->is_act_police) {
+		mutex_lock(&nic->mbox.lock);
+
+		err = cn10k_map_unmap_rq_policer(nic, flow_node->rq,
+						 flow_node->leaf_profile, false);
+		if (err)
+			netdev_err(nic->netdev,
+				   "Unmapping RQ %d & profile %d failed\n",
+				   flow_node->rq, flow_node->leaf_profile);
+
+		err = cn10k_free_leaf_profile(nic, flow_node->leaf_profile);
+		if (err)
+			netdev_err(nic->netdev,
+				   "Unable to free leaf bandwidth profile(%d)\n",
+				   flow_node->leaf_profile);
+
+		__clear_bit(flow_node->rq, &nic->rq_bmap);
+
+		mutex_unlock(&nic->mbox.lock);
+	}
+
 	otx2_del_mcam_flow_entry(nic, flow_node->entry);
 
 	WARN_ON(rhashtable_remove_fast(&nic->tc_info.flow_table,
@@ -516,7 +747,7 @@ static int otx2_tc_del_flow(struct otx2_nic *nic,
 	kfree_rcu(flow_node, rcu);
 
 	clear_bit(flow_node->bitpos, tc_info->tc_entries_bitmap);
-	tc_info->num_entries--;
+	flow_cfg->nr_flows--;
 
 	return 0;
 }
@@ -524,13 +755,21 @@ static int otx2_tc_del_flow(struct otx2_nic *nic,
 static int otx2_tc_add_flow(struct otx2_nic *nic,
 			    struct flow_cls_offload *tc_flow_cmd)
 {
+	struct netlink_ext_ack *extack = tc_flow_cmd->common.extack;
+	struct otx2_flow_config *flow_cfg = nic->flow_cfg;
 	struct otx2_tc_info *tc_info = &nic->tc_info;
 	struct otx2_tc_flow *new_node, *old_node;
-	struct npc_install_flow_req *req;
-	int rc;
+	struct npc_install_flow_req *req, dummy;
+	int rc, err;
 
 	if (!(nic->flags & OTX2_FLAG_TC_FLOWER_SUPPORT))
 		return -ENOMEM;
+
+	if (bitmap_full(tc_info->tc_entries_bitmap, flow_cfg->max_flows)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Free MCAM entry not available to add the flow");
+		return -ENOMEM;
+	}
 
 	/* allocate memory for the new flow and it's node */
 	new_node = kzalloc(sizeof(*new_node), GFP_KERNEL);
@@ -539,17 +778,11 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	spin_lock_init(&new_node->lock);
 	new_node->cookie = tc_flow_cmd->cookie;
 
-	mutex_lock(&nic->mbox.lock);
-	req = otx2_mbox_alloc_msg_npc_install_flow(&nic->mbox);
-	if (!req) {
-		mutex_unlock(&nic->mbox.lock);
-		return -ENOMEM;
-	}
+	memset(&dummy, 0, sizeof(struct npc_install_flow_req));
 
-	rc = otx2_tc_prepare_flow(nic, tc_flow_cmd, req);
+	rc = otx2_tc_prepare_flow(nic, new_node, tc_flow_cmd, &dummy);
 	if (rc) {
-		otx2_mbox_reset(&nic->mbox.mbox, 0);
-		mutex_unlock(&nic->mbox.lock);
+		kfree_rcu(new_node, rcu);
 		return rc;
 	}
 
@@ -560,18 +793,21 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	if (old_node)
 		otx2_tc_del_flow(nic, tc_flow_cmd);
 
-	if (bitmap_full(tc_info->tc_entries_bitmap, nic->flow_cfg->tc_max_flows)) {
-		netdev_err(nic->netdev, "Not enough MCAM space to add the flow\n");
-		otx2_mbox_reset(&nic->mbox.mbox, 0);
+	mutex_lock(&nic->mbox.lock);
+	req = otx2_mbox_alloc_msg_npc_install_flow(&nic->mbox);
+	if (!req) {
 		mutex_unlock(&nic->mbox.lock);
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto free_leaf;
 	}
 
+	memcpy(&dummy.hdr, &req->hdr, sizeof(struct mbox_msghdr));
+	memcpy(req, &dummy, sizeof(struct npc_install_flow_req));
+
 	new_node->bitpos = find_first_zero_bit(tc_info->tc_entries_bitmap,
-					       nic->flow_cfg->tc_max_flows);
+					       flow_cfg->max_flows);
 	req->channel = nic->hw.rx_chan_base;
-	req->entry = nic->flow_cfg->entry[nic->flow_cfg->tc_flower_offset +
-					  nic->flow_cfg->tc_max_flows - new_node->bitpos];
+	req->entry = flow_cfg->flow_ent[flow_cfg->max_flows - new_node->bitpos - 1];
 	req->intf = NIX_INTF_RX;
 	req->set_cntr = 1;
 	new_node->entry = req->entry;
@@ -579,9 +815,10 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	/* Send message to AF */
 	rc = otx2_sync_mbox_msg(&nic->mbox);
 	if (rc) {
-		netdev_err(nic->netdev, "Failed to install MCAM flow entry\n");
+		NL_SET_ERR_MSG_MOD(extack, "Failed to install MCAM flow entry");
 		mutex_unlock(&nic->mbox.lock);
-		goto out;
+		kfree_rcu(new_node, rcu);
+		goto free_leaf;
 	}
 	mutex_unlock(&nic->mbox.lock);
 
@@ -591,12 +828,35 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	if (rc) {
 		otx2_del_mcam_flow_entry(nic, req->entry);
 		kfree_rcu(new_node, rcu);
-		goto out;
+		goto free_leaf;
 	}
 
 	set_bit(new_node->bitpos, tc_info->tc_entries_bitmap);
-	tc_info->num_entries++;
-out:
+	flow_cfg->nr_flows++;
+
+	return 0;
+
+free_leaf:
+	if (new_node->is_act_police) {
+		mutex_lock(&nic->mbox.lock);
+
+		err = cn10k_map_unmap_rq_policer(nic, new_node->rq,
+						 new_node->leaf_profile, false);
+		if (err)
+			netdev_err(nic->netdev,
+				   "Unmapping RQ %d & profile %d failed\n",
+				   new_node->rq, new_node->leaf_profile);
+		err = cn10k_free_leaf_profile(nic, new_node->leaf_profile);
+		if (err)
+			netdev_err(nic->netdev,
+				   "Unable to free leaf bandwidth profile(%d)\n",
+				   new_node->leaf_profile);
+
+		__clear_bit(new_node->rq, &nic->rq_bmap);
+
+		mutex_unlock(&nic->mbox.lock);
+	}
+
 	return rc;
 }
 
@@ -675,6 +935,87 @@ static int otx2_setup_tc_cls_flower(struct otx2_nic *nic,
 	}
 }
 
+static int otx2_tc_ingress_matchall_install(struct otx2_nic *nic,
+					    struct tc_cls_matchall_offload *cls)
+{
+	struct netlink_ext_ack *extack = cls->common.extack;
+	struct flow_action *actions = &cls->rule->action;
+	struct flow_action_entry *entry;
+	u64 rate;
+	int err;
+
+	err = otx2_tc_validate_flow(nic, actions, extack);
+	if (err)
+		return err;
+
+	if (nic->flags & OTX2_FLAG_TC_MATCHALL_INGRESS_ENABLED) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only one ingress MATCHALL ratelimitter can be offloaded");
+		return -ENOMEM;
+	}
+
+	entry = &cls->rule->action.entries[0];
+	switch (entry->id) {
+	case FLOW_ACTION_POLICE:
+		/* Ingress ratelimiting is not supported on OcteonTx2 */
+		if (is_dev_otx2(nic->pdev)) {
+			NL_SET_ERR_MSG_MOD(extack,
+					   "Ingress policing not supported on this platform");
+			return -EOPNOTSUPP;
+		}
+
+		err = cn10k_alloc_matchall_ipolicer(nic);
+		if (err)
+			return err;
+
+		/* Convert to bits per second */
+		rate = entry->police.rate_bytes_ps * 8;
+		err = cn10k_set_matchall_ipolicer_rate(nic, entry->police.burst, rate);
+		if (err)
+			return err;
+		nic->flags |= OTX2_FLAG_TC_MATCHALL_INGRESS_ENABLED;
+		break;
+	default:
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only police action supported with Ingress MATCHALL offload");
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
+static int otx2_tc_ingress_matchall_delete(struct otx2_nic *nic,
+					   struct tc_cls_matchall_offload *cls)
+{
+	struct netlink_ext_ack *extack = cls->common.extack;
+	int err;
+
+	if (nic->flags & OTX2_FLAG_INTF_DOWN) {
+		NL_SET_ERR_MSG_MOD(extack, "Interface not initialized");
+		return -EINVAL;
+	}
+
+	err = cn10k_free_matchall_ipolicer(nic);
+	nic->flags &= ~OTX2_FLAG_TC_MATCHALL_INGRESS_ENABLED;
+	return err;
+}
+
+static int otx2_setup_tc_ingress_matchall(struct otx2_nic *nic,
+					  struct tc_cls_matchall_offload *cls_matchall)
+{
+	switch (cls_matchall->command) {
+	case TC_CLSMATCHALL_REPLACE:
+		return otx2_tc_ingress_matchall_install(nic, cls_matchall);
+	case TC_CLSMATCHALL_DESTROY:
+		return otx2_tc_ingress_matchall_delete(nic, cls_matchall);
+	case TC_CLSMATCHALL_STATS:
+	default:
+		break;
+	}
+
+	return -EOPNOTSUPP;
+}
+
 static int otx2_setup_tc_block_ingress_cb(enum tc_setup_type type,
 					  void *type_data, void *cb_priv)
 {
@@ -686,6 +1027,8 @@ static int otx2_setup_tc_block_ingress_cb(enum tc_setup_type type,
 	switch (type) {
 	case TC_SETUP_CLSFLOWER:
 		return otx2_setup_tc_cls_flower(nic, type_data);
+	case TC_SETUP_CLSMATCHALL:
+		return otx2_setup_tc_ingress_matchall(nic, type_data);
 	default:
 		break;
 	}
@@ -763,6 +1106,7 @@ int otx2_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		return -EOPNOTSUPP;
 	}
 }
+EXPORT_SYMBOL(otx2_setup_tc);
 
 static const struct rhashtable_params tc_flow_ht_params = {
 	.head_offset = offsetof(struct otx2_tc_flow, node),
@@ -774,14 +1118,36 @@ static const struct rhashtable_params tc_flow_ht_params = {
 int otx2_init_tc(struct otx2_nic *nic)
 {
 	struct otx2_tc_info *tc = &nic->tc_info;
+	int err;
+
+	/* Exclude receive queue 0 being used for police action */
+	set_bit(0, &nic->rq_bmap);
+
+	if (!nic->flow_cfg) {
+		netdev_err(nic->netdev,
+			   "Can't init TC, nic->flow_cfg is not setup\n");
+		return -EINVAL;
+	}
+
+	err = otx2_tc_alloc_ent_bitmap(nic);
+	if (err)
+		return err;
 
 	tc->flow_ht_params = tc_flow_ht_params;
-	return rhashtable_init(&tc->flow_table, &tc->flow_ht_params);
+	err = rhashtable_init(&tc->flow_table, &tc->flow_ht_params);
+	if (err) {
+		kfree(tc->tc_entries_bitmap);
+		tc->tc_entries_bitmap = NULL;
+	}
+	return err;
 }
+EXPORT_SYMBOL(otx2_init_tc);
 
 void otx2_shutdown_tc(struct otx2_nic *nic)
 {
 	struct otx2_tc_info *tc = &nic->tc_info;
 
+	kfree(tc->tc_entries_bitmap);
 	rhashtable_destroy(&tc->flow_table);
 }
+EXPORT_SYMBOL(otx2_shutdown_tc);

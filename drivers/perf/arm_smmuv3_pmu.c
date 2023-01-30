@@ -47,6 +47,7 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/msi.h>
+#include <linux/of.h>
 #include <linux/perf_event.h>
 #include <linux/platform_device.h>
 #include <linux/smp.h>
@@ -75,6 +76,10 @@
 #define SMMU_PMCG_CR                    0xE04
 #define SMMU_PMCG_CR_ENABLE             BIT(0)
 #define SMMU_PMCG_IIDR                  0xE08
+#define SMMU_PMCG_IIDR_PRODUCTID        GENMASK(31, 20)
+#define SMMU_PMCG_IIDR_VARIANT          GENMASK(19, 16)
+#define SMMU_PMCG_IIDR_REVISION         GENMASK(15, 12)
+#define SMMU_PMCG_IIDR_IMPLEMENTER      GENMASK(11, 0)
 #define SMMU_PMCG_CEID0                 0xE20
 #define SMMU_PMCG_CEID1                 0xE28
 #define SMMU_PMCG_IRQ_CTRL              0xE50
@@ -82,6 +87,20 @@
 #define SMMU_PMCG_IRQ_CFG0              0xE58
 #define SMMU_PMCG_IRQ_CFG1              0xE60
 #define SMMU_PMCG_IRQ_CFG2              0xE64
+
+/* IMP-DEF ID registers */
+#define SMMU_PMCG_PIDR0                 0xFE0
+#define SMMU_PMCG_PIDR0_PART_0          GENMASK(7, 0)
+#define SMMU_PMCG_PIDR1                 0xFE4
+#define SMMU_PMCG_PIDR1_DES_0           GENMASK(7, 4)
+#define SMMU_PMCG_PIDR1_PART_1          GENMASK(3, 0)
+#define SMMU_PMCG_PIDR2                 0xFE8
+#define SMMU_PMCG_PIDR2_REVISION        GENMASK(7, 4)
+#define SMMU_PMCG_PIDR2_DES_1           GENMASK(2, 0)
+#define SMMU_PMCG_PIDR3                 0xFEC
+#define SMMU_PMCG_PIDR3_REVAND          GENMASK(7, 4)
+#define SMMU_PMCG_PIDR4                 0xFD0
+#define SMMU_PMCG_PIDR4_DES_2           GENMASK(3, 0)
 
 /* MSI config fields */
 #define MSI_CFG0_ADDR_MASK              GENMASK_ULL(51, 2)
@@ -277,7 +296,7 @@ static int smmu_pmu_apply_event_filter(struct smmu_pmu *smmu_pmu,
 				       struct perf_event *event, int idx)
 {
 	u32 span, sid;
-	unsigned int num_ctrs = smmu_pmu->num_counters;
+	unsigned int cur_idx, num_ctrs = smmu_pmu->num_counters;
 	bool filter_en = !!get_filter_enable(event);
 
 	span = filter_en ? get_filter_span(event) :
@@ -285,17 +304,19 @@ static int smmu_pmu_apply_event_filter(struct smmu_pmu *smmu_pmu,
 	sid = filter_en ? get_filter_stream_id(event) :
 			   SMMU_PMCG_DEFAULT_FILTER_SID;
 
-	/* Support individual filter settings */
-	if (!smmu_pmu->global_filter) {
+	cur_idx = find_first_bit(smmu_pmu->used_counters, num_ctrs);
+	/*
+	 * Per-counter filtering, or scheduling the first globally-filtered
+	 * event into an empty PMU so idx == 0 and it works out equivalent.
+	 */
+	if (!smmu_pmu->global_filter || cur_idx == num_ctrs) {
 		smmu_pmu_set_event_filter(event, idx, span, sid);
 		return 0;
 	}
 
-	/* Requested settings same as current global settings*/
-	idx = find_first_bit(smmu_pmu->used_counters, num_ctrs);
-	if (idx == num_ctrs ||
-	    smmu_pmu_check_global_filter(smmu_pmu->events[idx], event)) {
-		smmu_pmu_set_event_filter(event, 0, span, sid);
+	/* Otherwise, must match whatever's currently scheduled */
+	if (smmu_pmu_check_global_filter(smmu_pmu->events[cur_idx], event)) {
+		smmu_pmu_set_evtyper(smmu_pmu, idx, get_event(event));
 		return 0;
 	}
 
@@ -509,11 +530,8 @@ static ssize_t smmu_pmu_event_show(struct device *dev,
 	return sysfs_emit(page, "event=0x%02llx\n", pmu_attr->id);
 }
 
-#define SMMU_EVENT_ATTR(name, config)					\
-	(&((struct perf_pmu_events_attr) {				\
-		.attr = __ATTR(name, 0444, smmu_pmu_event_show, NULL),	\
-		.id = config,						\
-	}).attr.attr)
+#define SMMU_EVENT_ATTR(name, config)			\
+	PMU_EVENT_ATTR_ID(name, smmu_pmu_event_show, config)
 
 static struct attribute *smmu_pmu_events[] = {
 	SMMU_EVENT_ATTR(cycles, 0),
@@ -628,7 +646,7 @@ static int smmu_pmu_offline_cpu(unsigned int cpu, struct hlist_node *node)
 
 	perf_pmu_migrate_context(&smmu_pmu->pmu, cpu, target);
 	smmu_pmu->on_cpu = target;
-	WARN_ON(irq_set_affinity_hint(smmu_pmu->irq, cpumask_of(target)));
+	WARN_ON(irq_set_affinity(smmu_pmu->irq, cpumask_of(target)));
 
 	return 0;
 }
@@ -636,6 +654,7 @@ static int smmu_pmu_offline_cpu(unsigned int cpu, struct hlist_node *node)
 static irqreturn_t smmu_pmu_handle_irq(int irq_num, void *data)
 {
 	struct smmu_pmu *smmu_pmu = data;
+	DECLARE_BITMAP(ovs, BITS_PER_TYPE(u64));
 	u64 ovsr;
 	unsigned int idx;
 
@@ -645,7 +664,8 @@ static irqreturn_t smmu_pmu_handle_irq(int irq_num, void *data)
 
 	writeq(ovsr, smmu_pmu->reloc_base + SMMU_PMCG_OVSCLR0);
 
-	for_each_set_bit(idx, (unsigned long *)&ovsr, smmu_pmu->num_counters) {
+	bitmap_from_u64(ovs, ovsr);
+	for_each_set_bit(idx, ovs, smmu_pmu->num_counters) {
 		struct perf_event *event = smmu_pmu->events[idx];
 		struct hw_perf_event *hwc;
 
@@ -685,7 +705,6 @@ static void smmu_pmu_write_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 
 static void smmu_pmu_setup_msi(struct smmu_pmu *pmu)
 {
-	struct msi_desc *desc;
 	struct device *dev = pmu->dev;
 	int ret;
 
@@ -702,9 +721,7 @@ static void smmu_pmu_setup_msi(struct smmu_pmu *pmu)
 		return;
 	}
 
-	desc = first_msi_entry(dev);
-	if (desc)
-		pmu->irq = desc->irq;
+	pmu->irq = msi_get_virq(dev, 0);
 
 	/* Add callback to free MSIs on teardown */
 	devm_add_action(dev, smmu_pmu_free_msis, dev);
@@ -753,6 +770,41 @@ static void smmu_pmu_get_acpi_options(struct smmu_pmu *smmu_pmu)
 	}
 
 	dev_notice(smmu_pmu->dev, "option mask 0x%x\n", smmu_pmu->options);
+}
+
+static bool smmu_pmu_coresight_id_regs(struct smmu_pmu *smmu_pmu)
+{
+	return of_device_is_compatible(smmu_pmu->dev->of_node,
+				       "arm,mmu-600-pmcg");
+}
+
+static void smmu_pmu_get_iidr(struct smmu_pmu *smmu_pmu)
+{
+	u32 iidr = readl_relaxed(smmu_pmu->reg_base + SMMU_PMCG_IIDR);
+
+	if (!iidr && smmu_pmu_coresight_id_regs(smmu_pmu)) {
+		u32 pidr0 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR0);
+		u32 pidr1 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR1);
+		u32 pidr2 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR2);
+		u32 pidr3 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR3);
+		u32 pidr4 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR4);
+
+		u32 productid = FIELD_GET(SMMU_PMCG_PIDR0_PART_0, pidr0) |
+				(FIELD_GET(SMMU_PMCG_PIDR1_PART_1, pidr1) << 8);
+		u32 variant = FIELD_GET(SMMU_PMCG_PIDR2_REVISION, pidr2);
+		u32 revision = FIELD_GET(SMMU_PMCG_PIDR3_REVAND, pidr3);
+		u32 implementer =
+			FIELD_GET(SMMU_PMCG_PIDR1_DES_0, pidr1) |
+			(FIELD_GET(SMMU_PMCG_PIDR2_DES_1, pidr2) << 4) |
+			(FIELD_GET(SMMU_PMCG_PIDR4_DES_2, pidr4) << 8);
+
+		iidr = FIELD_PREP(SMMU_PMCG_IIDR_PRODUCTID, productid) |
+		       FIELD_PREP(SMMU_PMCG_IIDR_VARIANT, variant) |
+		       FIELD_PREP(SMMU_PMCG_IIDR_REVISION, revision) |
+		       FIELD_PREP(SMMU_PMCG_IIDR_IMPLEMENTER, implementer);
+	}
+
+	smmu_pmu->iidr = iidr;
 }
 
 static int smmu_pmu_probe(struct platform_device *pdev)
@@ -826,7 +878,7 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 		return err;
 	}
 
-	smmu_pmu->iidr = readl_relaxed(smmu_pmu->reg_base + SMMU_PMCG_IIDR);
+	smmu_pmu_get_iidr(smmu_pmu);
 
 	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "smmuv3_pmcg_%llx",
 			      (res_0->start) >> SMMU_PMCG_PA_SHIFT);
@@ -835,19 +887,19 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	smmu_pmu_get_acpi_options(smmu_pmu);
+	if (!dev->of_node)
+		smmu_pmu_get_acpi_options(smmu_pmu);
 
 	/* Pick one CPU to be the preferred one to use */
 	smmu_pmu->on_cpu = raw_smp_processor_id();
-	WARN_ON(irq_set_affinity_hint(smmu_pmu->irq,
-				      cpumask_of(smmu_pmu->on_cpu)));
+	WARN_ON(irq_set_affinity(smmu_pmu->irq, cpumask_of(smmu_pmu->on_cpu)));
 
 	err = cpuhp_state_add_instance_nocalls(cpuhp_state_num,
 					       &smmu_pmu->node);
 	if (err) {
 		dev_err(dev, "Error %d registering hotplug, PMU @%pa\n",
 			err, &res_0->start);
-		goto out_clear_affinity;
+		return err;
 	}
 
 	err = perf_pmu_register(&smmu_pmu->pmu, name, -1);
@@ -866,8 +918,6 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 
 out_unregister:
 	cpuhp_state_remove_instance_nocalls(cpuhp_state_num, &smmu_pmu->node);
-out_clear_affinity:
-	irq_set_affinity_hint(smmu_pmu->irq, NULL);
 	return err;
 }
 
@@ -877,7 +927,6 @@ static int smmu_pmu_remove(struct platform_device *pdev)
 
 	perf_pmu_unregister(&smmu_pmu->pmu);
 	cpuhp_state_remove_instance_nocalls(cpuhp_state_num, &smmu_pmu->node);
-	irq_set_affinity_hint(smmu_pmu->irq, NULL);
 
 	return 0;
 }
@@ -889,9 +938,18 @@ static void smmu_pmu_shutdown(struct platform_device *pdev)
 	smmu_pmu_disable(&smmu_pmu->pmu);
 }
 
+#ifdef CONFIG_OF
+static const struct of_device_id smmu_pmu_of_match[] = {
+	{ .compatible = "arm,smmu-v3-pmcg" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, smmu_pmu_of_match);
+#endif
+
 static struct platform_driver smmu_pmu_driver = {
 	.driver = {
 		.name = "arm-smmu-v3-pmcg",
+		.of_match_table = of_match_ptr(smmu_pmu_of_match),
 		.suppress_bind_attrs = true,
 	},
 	.probe = smmu_pmu_probe,
@@ -901,6 +959,8 @@ static struct platform_driver smmu_pmu_driver = {
 
 static int __init arm_smmu_pmu_init(void)
 {
+	int ret;
+
 	cpuhp_state_num = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
 						  "perf/arm/pmcg:online",
 						  NULL,
@@ -908,7 +968,11 @@ static int __init arm_smmu_pmu_init(void)
 	if (cpuhp_state_num < 0)
 		return cpuhp_state_num;
 
-	return platform_driver_register(&smmu_pmu_driver);
+	ret = platform_driver_register(&smmu_pmu_driver);
+	if (ret)
+		cpuhp_remove_multi_state(cpuhp_state_num);
+
+	return ret;
 }
 module_init(arm_smmu_pmu_init);
 

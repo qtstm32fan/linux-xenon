@@ -421,7 +421,7 @@ int vmw_overlay_pause_all(struct vmw_private *dev_priv)
 static bool vmw_overlay_available(const struct vmw_private *dev_priv)
 {
 	return (dev_priv->overlay_priv != NULL &&
-		((dev_priv->fifo.capabilities & VMW_OVERLAY_CAP_MASK) ==
+		((vmw_fifo_caps(dev_priv) & VMW_OVERLAY_CAP_MASK) ==
 		 VMW_OVERLAY_CAP_MASK));
 }
 
@@ -451,7 +451,7 @@ int vmw_overlay_ioctl(struct drm_device *dev, void *data,
 		goto out_unlock;
 	}
 
-	ret = vmw_user_bo_lookup(tfile, arg->handle, &buf, NULL);
+	ret = vmw_user_bo_lookup(file_priv, arg->handle, &buf);
 	if (ret)
 		goto out_unlock;
 

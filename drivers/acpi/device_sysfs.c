@@ -53,6 +53,7 @@ static struct attribute *acpi_data_node_default_attrs[] = {
 	&data_node_path.attr,
 	NULL
 };
+ATTRIBUTE_GROUPS(acpi_data_node_default);
 
 #define to_data_node(k) container_of(k, struct acpi_data_node, kobj)
 #define to_attr(a) container_of(a, struct acpi_data_node_attr, attr)
@@ -79,7 +80,7 @@ static void acpi_data_node_release(struct kobject *kobj)
 
 static struct kobj_type acpi_data_node_ktype = {
 	.sysfs_ops = &acpi_data_node_sysfs_ops,
-	.default_attrs = acpi_data_node_default_attrs,
+	.default_groups = acpi_data_node_default_groups,
 	.release = acpi_data_node_release,
 };
 
@@ -268,6 +269,8 @@ int __acpi_device_uevent_modalias(struct acpi_device *adev,
 
 /**
  * acpi_device_uevent_modalias - uevent modalias for ACPI-enumerated devices.
+ * @dev: Struct device to get ACPI device node.
+ * @env: Environment variables of the kobject uevent.
  *
  * Create the uevent modalias field for ACPI-enumerated devices.
  *
@@ -313,6 +316,9 @@ static int __acpi_device_modalias(struct acpi_device *adev, char *buf, int size)
 
 /**
  * acpi_device_modalias - modalias sysfs attribute for ACPI-enumerated devices.
+ * @dev: Struct device to get ACPI device node.
+ * @buf: The buffer to save pnp_modalias and of_modalias.
+ * @size: Size of buffer.
  *
  * Create the modalias sysfs attribute for ACPI-enumerated devices.
  *
@@ -370,7 +376,7 @@ eject_store(struct device *d, struct device_attribute *attr,
 		return -EINVAL;
 
 	if ((!acpi_device->handler || !acpi_device->handler->hotplug.enabled)
-	    && !acpi_device->driver)
+	    && !d->driver)
 		return -ENODEV;
 
 	status = acpi_get_type(acpi_device->handle, &not_used);
@@ -448,7 +454,7 @@ static ssize_t description_show(struct device *dev,
 		(wchar_t *)acpi_dev->pnp.str_obj->buffer.pointer,
 		acpi_dev->pnp.str_obj->buffer.length,
 		UTF16_LITTLE_ENDIAN, buf,
-		PAGE_SIZE);
+		PAGE_SIZE - 1);
 
 	buf[result++] = '\n';
 

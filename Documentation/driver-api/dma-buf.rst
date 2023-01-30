@@ -88,6 +88,9 @@ consider though:
 - The DMA buffer FD is also pollable, see `Implicit Fence Poll Support`_ below for
   details.
 
+- The DMA buffer FD also supports a few dma-buf-specific ioctls, see
+  `DMA Buffer ioctls`_ below for details.
+
 Basic Operation and Device DMA Access
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -106,6 +109,16 @@ Implicit Fence Poll Support
 .. kernel-doc:: drivers/dma-buf/dma-buf.c
    :doc: implicit fence polling
 
+DMA-BUF statistics
+~~~~~~~~~~~~~~~~~~
+.. kernel-doc:: drivers/dma-buf/dma-buf-sysfs-stats.c
+   :doc: overview
+
+DMA Buffer ioctls
+~~~~~~~~~~~~~~~~~
+
+.. kernel-doc:: include/uapi/linux/dma-buf.h
+
 Kernel Functions and Structures Reference
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -113,15 +126,6 @@ Kernel Functions and Structures Reference
    :export:
 
 .. kernel-doc:: include/linux/dma-buf.h
-   :internal:
-
-Buffer Mapping Helpers
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. kernel-doc:: include/linux/dma-buf-map.h
-   :doc: overview
-
-.. kernel-doc:: include/linux/dma-buf-map.h
    :internal:
 
 Reservation Objects
@@ -163,12 +167,6 @@ DMA Fences Functions Reference
 .. kernel-doc:: include/linux/dma-fence.h
    :internal:
 
-Seqno Hardware Fences
-~~~~~~~~~~~~~~~~~~~~~
-
-.. kernel-doc:: include/linux/seqno-fence.h
-   :internal:
-
 DMA Fence Array
 ~~~~~~~~~~~~~~~
 
@@ -176,6 +174,21 @@ DMA Fence Array
    :export:
 
 .. kernel-doc:: include/linux/dma-fence-array.h
+   :internal:
+
+DMA Fence Chain
+~~~~~~~~~~~~~~~
+
+.. kernel-doc:: drivers/dma-buf/dma-fence-chain.c
+   :export:
+
+.. kernel-doc:: include/linux/dma-fence-chain.h
+   :internal:
+
+DMA Fence unwrap
+~~~~~~~~~~~~~~~~
+
+.. kernel-doc:: include/linux/dma-fence-unwrap.h
    :internal:
 
 DMA Fence uABI/Sync File

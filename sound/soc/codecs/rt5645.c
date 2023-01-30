@@ -2969,7 +2969,7 @@ static int rt5645_set_dai_pll(struct snd_soc_dai *dai, int pll_id, int source,
 
 	ret = rl6231_pll_calc(freq_in, freq_out, &pll_code);
 	if (ret < 0) {
-		dev_err(component->dev, "Unsupport input clock %d\n", freq_in);
+		dev_err(component->dev, "Unsupported input clock %d\n", freq_in);
 		return ret;
 	}
 
@@ -3388,44 +3388,30 @@ static int rt5645_probe(struct snd_soc_component *component)
 {
 	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 	struct rt5645_priv *rt5645 = snd_soc_component_get_drvdata(component);
-	int ret = 0;
 
 	rt5645->component = component;
 
 	switch (rt5645->codec_type) {
 	case CODEC_TYPE_RT5645:
-		ret = snd_soc_dapm_new_controls(dapm,
+		snd_soc_dapm_new_controls(dapm,
 			rt5645_specific_dapm_widgets,
 			ARRAY_SIZE(rt5645_specific_dapm_widgets));
-		if (ret < 0)
-			goto exit;
-
-		ret = snd_soc_dapm_add_routes(dapm,
+		snd_soc_dapm_add_routes(dapm,
 			rt5645_specific_dapm_routes,
 			ARRAY_SIZE(rt5645_specific_dapm_routes));
-		if (ret < 0)
-			goto exit;
-
 		if (rt5645->v_id < 3) {
-			ret = snd_soc_dapm_add_routes(dapm,
+			snd_soc_dapm_add_routes(dapm,
 				rt5645_old_dapm_routes,
 				ARRAY_SIZE(rt5645_old_dapm_routes));
-			if (ret < 0)
-				goto exit;
 		}
 		break;
 	case CODEC_TYPE_RT5650:
-		ret = snd_soc_dapm_new_controls(dapm,
+		snd_soc_dapm_new_controls(dapm,
 			rt5650_specific_dapm_widgets,
 			ARRAY_SIZE(rt5650_specific_dapm_widgets));
-		if (ret < 0)
-			goto exit;
-
-		ret = snd_soc_dapm_add_routes(dapm,
+		snd_soc_dapm_add_routes(dapm,
 			rt5650_specific_dapm_routes,
 			ARRAY_SIZE(rt5650_specific_dapm_routes));
-		if (ret < 0)
-			goto exit;
 		break;
 	}
 
@@ -3433,17 +3419,9 @@ static int rt5645_probe(struct snd_soc_component *component)
 
 	/* for JD function */
 	if (rt5645->pdata.jd_mode) {
-		ret = snd_soc_dapm_force_enable_pin(dapm, "JD Power");
-		if (ret < 0)
-			goto exit;
-
-		ret = snd_soc_dapm_force_enable_pin(dapm, "LDO2");
-		if (ret < 0)
-			goto exit;
-
-		ret = snd_soc_dapm_sync(dapm);
-		if (ret < 0)
-			goto exit;
+		snd_soc_dapm_force_enable_pin(dapm, "JD Power");
+		snd_soc_dapm_force_enable_pin(dapm, "LDO2");
+		snd_soc_dapm_sync(dapm);
 	}
 
 	if (rt5645->pdata.long_name)
@@ -3454,14 +3432,9 @@ static int rt5645_probe(struct snd_soc_component *component)
 		GFP_KERNEL);
 
 	if (!rt5645->eq_param)
-		ret = -ENOMEM;
-exit:
-	/*
-	 * If there was an error above, everything will be cleaned up by the
-	 * caller if we return an error here.  This will be done with a later
-	 * call to rt5645_remove().
-	 */
-	return ret;
+		return -ENOMEM;
+
+	return 0;
 }
 
 static void rt5645_remove(struct snd_soc_component *component)
@@ -3561,7 +3534,6 @@ static const struct snd_soc_component_driver soc_component_dev_rt5645 = {
 	.num_dapm_routes	= ARRAY_SIZE(rt5645_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config rt5645_regmap = {
@@ -3882,8 +3854,7 @@ static int rt5645_parse_dt(struct rt5645_priv *rt5645, struct device *dev)
 	return 0;
 }
 
-static int rt5645_i2c_probe(struct i2c_client *i2c,
-		    const struct i2c_device_id *id)
+static int rt5645_i2c_probe(struct i2c_client *i2c)
 {
 	struct rt5645_platform_data *pdata = NULL;
 	const struct dmi_system_id *dmi_data;
@@ -3971,7 +3942,7 @@ static int rt5645_i2c_probe(struct i2c_client *i2c,
 		ret = PTR_ERR(regmap);
 		dev_err(&i2c->dev, "Failed to allocate temp register map: %d\n",
 			ret);
-		return ret;
+		goto err_enable;
 	}
 
 	/*
@@ -4002,7 +3973,7 @@ static int rt5645_i2c_probe(struct i2c_client *i2c,
 		ret = PTR_ERR(rt5645->regmap);
 		dev_err(&i2c->dev, "Failed to allocate register map: %d\n",
 			ret);
-		return ret;
+		goto err_enable;
 	}
 
 	regmap_write(rt5645->regmap, RT5645_RESET, 0);
@@ -4174,20 +4145,23 @@ err_enable:
 	return ret;
 }
 
-static int rt5645_i2c_remove(struct i2c_client *i2c)
+static void rt5645_i2c_remove(struct i2c_client *i2c)
 {
 	struct rt5645_priv *rt5645 = i2c_get_clientdata(i2c);
 
 	if (i2c->irq)
 		free_irq(i2c->irq, rt5645);
 
-	cancel_delayed_work_sync(&rt5645->jack_detect_work);
-	cancel_delayed_work_sync(&rt5645->rcclock_work);
+	/*
+	 * Since the rt5645_btn_check_callback() can queue jack_detect_work,
+	 * the timer need to be delted first
+	 */
 	del_timer_sync(&rt5645->btn_check_timer);
 
-	regulator_bulk_disable(ARRAY_SIZE(rt5645->supplies), rt5645->supplies);
+	cancel_delayed_work_sync(&rt5645->jack_detect_work);
+	cancel_delayed_work_sync(&rt5645->rcclock_work);
 
-	return 0;
+	regulator_bulk_disable(ARRAY_SIZE(rt5645->supplies), rt5645->supplies);
 }
 
 static void rt5645_i2c_shutdown(struct i2c_client *i2c)
@@ -4210,7 +4184,7 @@ static struct i2c_driver rt5645_i2c_driver = {
 		.of_match_table = of_match_ptr(rt5645_of_match),
 		.acpi_match_table = ACPI_PTR(rt5645_acpi_match),
 	},
-	.probe = rt5645_i2c_probe,
+	.probe_new = rt5645_i2c_probe,
 	.remove = rt5645_i2c_remove,
 	.shutdown = rt5645_i2c_shutdown,
 	.id_table = rt5645_i2c_id,

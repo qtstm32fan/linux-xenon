@@ -19,11 +19,15 @@ select:
           - rockchip,rk3128-gmac
           - rockchip,rk3228-gmac
           - rockchip,rk3288-gmac
+          - rockchip,rk3308-gmac
           - rockchip,rk3328-gmac
           - rockchip,rk3366-gmac
           - rockchip,rk3368-gmac
           - rockchip,rk3399-gmac
+          - rockchip,rk3568-gmac
+          - rockchip,rk3588-gmac
           - rockchip,rv1108-gmac
+          - rockchip,rv1126-gmac
   required:
     - compatible
 
@@ -32,17 +36,25 @@ allOf:
 
 properties:
   compatible:
-    items:
-      - enum:
-          - rockchip,px30-gmac
-          - rockchip,rk3128-gmac
-          - rockchip,rk3228-gmac
-          - rockchip,rk3288-gmac
-          - rockchip,rk3328-gmac
-          - rockchip,rk3366-gmac
-          - rockchip,rk3368-gmac
-          - rockchip,rk3399-gmac
-          - rockchip,rv1108-gmac
+    oneOf:
+      - items:
+          - enum:
+              - rockchip,px30-gmac
+              - rockchip,rk3128-gmac
+              - rockchip,rk3228-gmac
+              - rockchip,rk3288-gmac
+              - rockchip,rk3308-gmac
+              - rockchip,rk3328-gmac
+              - rockchip,rk3366-gmac
+              - rockchip,rk3368-gmac
+              - rockchip,rk3399-gmac
+              - rockchip,rv1108-gmac
+              - rockchip,rv1126-gmac
+      - items:
+          - enum:
+              - rockchip,rk3568-gmac
+              - rockchip,rk3588-gmac
+          - const: snps,dwmac-4.20a
 
   clocks:
     minItems: 5
@@ -71,6 +83,11 @@ properties:
 
   rockchip,grf:
     description: The phandle of the syscon node for the general register file.
+    $ref: /schemas/types.yaml#/definitions/phandle
+
+  rockchip,php-grf:
+    description:
+      The phandle of the syscon node for the peripheral general register file.
     $ref: /schemas/types.yaml#/definitions/phandle
 
   tx_delay:

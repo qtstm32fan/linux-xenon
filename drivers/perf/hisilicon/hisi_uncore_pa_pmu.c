@@ -27,7 +27,7 @@
 #define PA_INT_CLEAR			0x1c7c
 #define PA_EVENT_TYPE0			0x1c80
 #define PA_PMU_VERSION			0x1cf0
-#define PA_EVENT_CNT0_L			0x1f00
+#define PA_EVENT_CNT0_L			0x1d00
 
 #define PA_EVTYPE_MASK			0xff
 #define PA_NR_COUNTERS			0x8
@@ -258,13 +258,12 @@ static int hisi_pa_pmu_init_data(struct platform_device *pdev,
 				   struct hisi_pmu *pa_pmu)
 {
 	/*
-	 * Use the SCCL_ID and the index ID to identify the PA PMU,
-	 * while SCCL_ID is the nearst SCCL_ID from this SICL and
-	 * CPU core is chosen from this SCCL to manage this PMU.
+	 * As PA PMU is in a SICL, use the SICL_ID and the index ID
+	 * to identify the PA PMU.
 	 */
 	if (device_property_read_u32(&pdev->dev, "hisilicon,scl-id",
-				     &pa_pmu->sccl_id)) {
-		dev_err(&pdev->dev, "Cannot read sccl-id!\n");
+				     &pa_pmu->sicl_id)) {
+		dev_err(&pdev->dev, "Cannot read sicl-id!\n");
 		return -EINVAL;
 	}
 
@@ -275,6 +274,7 @@ static int hisi_pa_pmu_init_data(struct platform_device *pdev,
 	}
 
 	pa_pmu->ccl_id = -1;
+	pa_pmu->sccl_id = -1;
 
 	pa_pmu->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pa_pmu->base)) {
@@ -333,7 +333,7 @@ static struct attribute *hisi_pa_pmu_identifier_attrs[] = {
 	NULL
 };
 
-static struct attribute_group hisi_pa_pmu_identifier_group = {
+static const struct attribute_group hisi_pa_pmu_identifier_group = {
 	.attrs = hisi_pa_pmu_identifier_attrs,
 };
 
@@ -399,13 +399,9 @@ static int hisi_pa_pmu_probe(struct platform_device *pdev)
 	ret = hisi_pa_pmu_dev_probe(pdev, pa_pmu);
 	if (ret)
 		return ret;
-	/*
-	 * PA is attached in SICL and the CPU core is chosen to manage this
-	 * PMU which is the nearest SCCL, while its SCCL_ID is greater than
-	 * one with the SICL_ID.
-	 */
+
 	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "hisi_sicl%u_pa%u",
-			      pa_pmu->sccl_id - 1, pa_pmu->index_id);
+			      pa_pmu->sicl_id, pa_pmu->index_id);
 	if (!name)
 		return -ENOMEM;
 
@@ -416,27 +412,12 @@ static int hisi_pa_pmu_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	pa_pmu->pmu = (struct pmu) {
-		.module		= THIS_MODULE,
-		.task_ctx_nr	= perf_invalid_context,
-		.event_init	= hisi_uncore_pmu_event_init,
-		.pmu_enable	= hisi_uncore_pmu_enable,
-		.pmu_disable	= hisi_uncore_pmu_disable,
-		.add		= hisi_uncore_pmu_add,
-		.del		= hisi_uncore_pmu_del,
-		.start		= hisi_uncore_pmu_start,
-		.stop		= hisi_uncore_pmu_stop,
-		.read		= hisi_uncore_pmu_read,
-		.attr_groups    = pa_pmu->pmu_events.attr_groups,
-		.capabilities	= PERF_PMU_CAP_NO_EXCLUDE,
-	};
-
+	hisi_pmu_init(&pa_pmu->pmu, name, pa_pmu->pmu_events.attr_groups, THIS_MODULE);
 	ret = perf_pmu_register(&pa_pmu->pmu, name, -1);
 	if (ret) {
 		dev_err(pa_pmu->dev, "PMU register failed, ret = %d\n", ret);
 		cpuhp_state_remove_instance(CPUHP_AP_PERF_ARM_HISI_PA_ONLINE,
 					    &pa_pmu->node);
-		irq_set_affinity_hint(pa_pmu->irq, NULL);
 		return ret;
 	}
 
@@ -451,8 +432,6 @@ static int hisi_pa_pmu_remove(struct platform_device *pdev)
 	perf_pmu_unregister(&pa_pmu->pmu);
 	cpuhp_state_remove_instance_nocalls(CPUHP_AP_PERF_ARM_HISI_PA_ONLINE,
 					    &pa_pmu->node);
-	irq_set_affinity_hint(pa_pmu->irq, NULL);
-
 	return 0;
 }
 

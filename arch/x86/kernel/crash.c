@@ -70,19 +70,6 @@ static inline void cpu_crash_vmclear_loaded_vmcss(void)
 	rcu_read_unlock();
 }
 
-/*
- * When the crashkernel option is specified, only use the low
- * 1M for the real mode trampoline.
- */
-void __init crash_reserve_low_1M(void)
-{
-	if (cmdline_find_option(boot_command_line, "crashkernel", NULL, 0) < 0)
-		return;
-
-	memblock_reserve(0, 1<<20);
-	pr_info("Reserving the low 1M of memory for crashkernel\n");
-}
-
 #if defined(CONFIG_SMP) && defined(CONFIG_X86_LOCAL_APIC)
 
 static void kdump_nmi_callback(int cpu, struct pt_regs *regs)
@@ -414,13 +401,11 @@ int crash_load_segments(struct kimage *image)
 	kbuf.buf_align = ELF_CORE_HEADER_ALIGN;
 	kbuf.mem = KEXEC_BUF_MEM_UNKNOWN;
 	ret = kexec_add_buffer(&kbuf);
-	if (ret) {
-		vfree((void *)image->elf_headers);
+	if (ret)
 		return ret;
-	}
 	image->elf_load_addr = kbuf.mem;
 	pr_debug("Loaded ELF headers at 0x%lx bufsz=0x%lx memsz=0x%lx\n",
-		 image->elf_load_addr, kbuf.bufsz, kbuf.bufsz);
+		 image->elf_load_addr, kbuf.bufsz, kbuf.memsz);
 
 	return ret;
 }

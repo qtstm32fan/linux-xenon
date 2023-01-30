@@ -221,12 +221,12 @@ static int gpu_set(struct context *ctx, unsigned long offset, u32 v)
 		goto out_rq;
 	}
 
-	if (INTEL_GEN(ctx->engine->i915) >= 8) {
+	if (GRAPHICS_VER(ctx->engine->i915) >= 8) {
 		*cs++ = MI_STORE_DWORD_IMM_GEN4 | 1 << 22;
 		*cs++ = lower_32_bits(i915_ggtt_offset(vma) + offset);
 		*cs++ = upper_32_bits(i915_ggtt_offset(vma) + offset);
 		*cs++ = v;
-	} else if (INTEL_GEN(ctx->engine->i915) >= 4) {
+	} else if (GRAPHICS_VER(ctx->engine->i915) >= 4) {
 		*cs++ = MI_STORE_DWORD_IMM_GEN4 | MI_USE_GGTT;
 		*cs++ = 0;
 		*cs++ = i915_ggtt_offset(vma) + offset;
@@ -434,5 +434,5 @@ int i915_gem_coherency_live_selftests(struct drm_i915_private *i915)
 		SUBTEST(igt_gem_coherency),
 	};
 
-	return i915_subtests(tests, i915);
+	return i915_live_subtests(tests, i915);
 }

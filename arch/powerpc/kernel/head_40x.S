@@ -27,6 +27,7 @@
 
 #include <linux/init.h>
 #include <linux/pgtable.h>
+#include <linux/sizes.h>
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
@@ -52,8 +53,8 @@
  * This is all going to change RSN when we add bi_recs.......  -- Dan
  */
 	__HEAD
-_ENTRY(_stext);
-_ENTRY(_start);
+_GLOBAL(_stext);
+_GLOBAL(_start);
 
 	mr	r31,r3			/* save device tree ptr */
 
@@ -81,19 +82,19 @@ turn_on_mmu:
  */
 	. = 0xc0
 crit_save:
-_ENTRY(crit_r10)
+_GLOBAL(crit_r10)
 	.space	4
-_ENTRY(crit_r11)
+_GLOBAL(crit_r11)
 	.space	4
-_ENTRY(crit_srr0)
+_GLOBAL(crit_srr0)
 	.space	4
-_ENTRY(crit_srr1)
+_GLOBAL(crit_srr1)
 	.space	4
-_ENTRY(crit_r1)
+_GLOBAL(crit_r1)
 	.space	4
-_ENTRY(crit_dear)
+_GLOBAL(crit_dear)
 	.space	4
-_ENTRY(crit_esr)
+_GLOBAL(crit_esr)
 	.space	4
 
 /*
@@ -297,6 +298,10 @@ _ASM_NOKPROBE_SYMBOL(\name\()_virt)
 3:
 	mfspr	r11,SPRN_SPRG_THREAD
 	lwz	r11,PGDIR(r11)
+#ifdef CONFIG_PPC_KUAP
+	rlwinm.	r9, r9, 0, 0xff
+	beq	5f			/* Kuap fault */
+#endif
 4:
 	tophys(r11, r11)
 	rlwimi	r11, r10, 12, 20, 29	/* Create L1 (pgdir/pmd) address */
@@ -377,6 +382,10 @@ _ASM_NOKPROBE_SYMBOL(\name\()_virt)
 3:
 	mfspr	r11,SPRN_SPRG_THREAD
 	lwz	r11,PGDIR(r11)
+#ifdef CONFIG_PPC_KUAP
+	rlwinm.	r9, r9, 0, 0xff
+	beq	5f			/* Kuap fault */
+#endif
 4:
 	tophys(r11, r11)
 	rlwimi	r11, r10, 12, 20, 29	/* Create L1 (pgdir/pmd) address */
@@ -650,7 +659,7 @@ start_here:
 	b	.		/* prevent prefetch past rfi */
 
 /* Set up the initial MMU state so we can do the first level of
- * kernel initialization.  This maps the first 16 MBytes of memory 1:1
+ * kernel initialization.  This maps the first 32 MBytes of memory 1:1
  * virtual to physical and more importantly sets the cache mode.
  */
 initial_mmu:
@@ -687,6 +696,12 @@ initial_mmu:
 	tlbwe	r4,r0,TLB_DATA		/* Load the data portion of the entry */
 	tlbwe	r3,r0,TLB_TAG		/* Load the tag portion of the entry */
 
+	li	r0,62			/* TLB slot 62 */
+	addis	r4,r4,SZ_16M@h
+	addis	r3,r3,SZ_16M@h
+	tlbwe	r4,r0,TLB_DATA		/* Load the data portion of the entry */
+	tlbwe	r3,r0,TLB_TAG		/* Load the tag portion of the entry */
+
 	isync
 
 	/* Establish the exception vector base
@@ -701,39 +716,3 @@ _GLOBAL(abort)
         mfspr   r13,SPRN_DBCR0
         oris    r13,r13,DBCR0_RST_SYSTEM@h
         mtspr   SPRN_DBCR0,r13
-
-_GLOBAL(set_context)
-
-#ifdef CONFIG_BDI_SWITCH
-	/* Context switch the PTE pointer for the Abatron BDI2000.
-	 * The PGDIR is the second parameter.
-	 */
-	lis	r5, abatron_pteptrs@ha
-	stw	r4, abatron_pteptrs@l + 0x4(r5)
-#endif
-	sync
-	mtspr	SPRN_PID,r3
-	isync				/* Need an isync to flush shadow */
-					/* TLBs after changing PID */
-	blr
-
-/* We put a few things here that have to be page-aligned. This stuff
- * goes at the beginning of the data segment, which is page-aligned.
- */
-	.data
-	.align	12
-	.globl	sdata
-sdata:
-	.globl	empty_zero_page
-empty_zero_page:
-	.space	4096
-EXPORT_SYMBOL(empty_zero_page)
-	.globl	swapper_pg_dir
-swapper_pg_dir:
-	.space	PGD_TABLE_SIZE
-
-/* Room for two PTE pointers, usually the kernel and current user pointers
- * to their respective root page table.
- */
-abatron_pteptrs:
-	.space	8

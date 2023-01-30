@@ -19,6 +19,7 @@
 #include <linux/console.h>
 #include <linux/interrupt.h>
 #include <linux/err.h>
+#include <linux/panic_notifier.h>
 #include <linux/reboot.h>
 #include <linux/serial.h> /* ASYNC_* flags */
 #include <linux/slab.h>
@@ -770,35 +771,36 @@ static struct tty_driver *con3215_device(struct console *c, int *index)
 }
 
 /*
- * panic() calls con3215_flush through a panic_notifier
- * before the system enters a disabled, endless loop.
+ * The below function is called as a panic/reboot notifier before the
+ * system enters a disabled, endless loop.
+ *
+ * Notice we must use the spin_trylock() alternative, to prevent lockups
+ * in atomic context (panic routine runs with secondary CPUs, local IRQs
+ * and preemption disabled).
  */
-static void con3215_flush(void)
+static int con3215_notify(struct notifier_block *self,
+			  unsigned long event, void *data)
 {
 	struct raw3215_info *raw;
 	unsigned long flags;
 
 	raw = raw3215[0];  /* console 3215 is the first one */
-	spin_lock_irqsave(get_ccwdev_lock(raw->cdev), flags);
+	if (!spin_trylock_irqsave(get_ccwdev_lock(raw->cdev), flags))
+		return NOTIFY_DONE;
 	raw3215_make_room(raw, RAW3215_BUFFER_SIZE);
 	spin_unlock_irqrestore(get_ccwdev_lock(raw->cdev), flags);
-}
 
-static int con3215_notify(struct notifier_block *self,
-			  unsigned long event, void *data)
-{
-	con3215_flush();
-	return NOTIFY_OK;
+	return NOTIFY_DONE;
 }
 
 static struct notifier_block on_panic_nb = {
 	.notifier_call = con3215_notify,
-	.priority = 0,
+	.priority = INT_MIN + 1, /* run the callback late */
 };
 
 static struct notifier_block on_reboot_nb = {
 	.notifier_call = con3215_notify,
-	.priority = 0,
+	.priority = INT_MIN + 1, /* run the callback late */
 };
 
 /*
@@ -924,7 +926,7 @@ static void tty3215_close(struct tty_struct *tty, struct file * filp)
 /*
  * Returns the amount of free space in the output buffer.
  */
-static int tty3215_write_room(struct tty_struct *tty)
+static unsigned int tty3215_write_room(struct tty_struct *tty)
 {
 	struct raw3215_info *raw = tty->driver_data;
 
@@ -980,7 +982,7 @@ static void tty3215_flush_chars(struct tty_struct *tty)
 /*
  * Returns the number of characters in the output buffer
  */
-static int tty3215_chars_in_buffer(struct tty_struct *tty)
+static unsigned int tty3215_chars_in_buffer(struct tty_struct *tty)
 {
 	struct raw3215_info *raw = tty->driver_data;
 
@@ -1075,13 +1077,13 @@ static int __init tty3215_init(void)
 	if (!CONSOLE_IS_3215)
 		return 0;
 
-	driver = alloc_tty_driver(NR_3215);
-	if (!driver)
-		return -ENOMEM;
+	driver = tty_alloc_driver(NR_3215, TTY_DRIVER_REAL_RAW);
+	if (IS_ERR(driver))
+		return PTR_ERR(driver);
 
 	ret = ccw_driver_register(&raw3215_ccw_driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		return ret;
 	}
 	/*
@@ -1100,11 +1102,10 @@ static int __init tty3215_init(void)
 	driver->init_termios.c_iflag = IGNBRK | IGNPAR;
 	driver->init_termios.c_oflag = ONLCR;
 	driver->init_termios.c_lflag = ISIG;
-	driver->flags = TTY_DRIVER_REAL_RAW;
 	tty_set_operations(driver, &tty3215_ops);
 	ret = tty_register_driver(driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		return ret;
 	}
 	tty3215_driver = driver;

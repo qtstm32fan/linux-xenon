@@ -3,6 +3,7 @@
  * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
  */
+#include <linux/overflow.h>
 #include <linux/errno.h>
 #include <linux/hash.h>
 
@@ -27,7 +28,7 @@ void pkt_sys_idle_indicator(struct hfi_sys_set_property_pkt *pkt, u32 enable)
 {
 	struct hfi_enable *hfi = (struct hfi_enable *)&pkt->data[1];
 
-	pkt->hdr.size = sizeof(*pkt) + sizeof(*hfi) + sizeof(u32);
+	pkt->hdr.size = struct_size(pkt, data, 1) + sizeof(*hfi);
 	pkt->hdr.pkt_type = HFI_CMD_SYS_SET_PROPERTY;
 	pkt->num_properties = 1;
 	pkt->data[0] = HFI_PROPERTY_SYS_IDLE_INDICATOR;
@@ -39,7 +40,7 @@ void pkt_sys_debug_config(struct hfi_sys_set_property_pkt *pkt, u32 mode,
 {
 	struct hfi_debug_config *hfi;
 
-	pkt->hdr.size = sizeof(*pkt) + sizeof(*hfi) + sizeof(u32);
+	pkt->hdr.size = struct_size(pkt, data, 1) + sizeof(*hfi);
 	pkt->hdr.pkt_type = HFI_CMD_SYS_SET_PROPERTY;
 	pkt->num_properties = 1;
 	pkt->data[0] = HFI_PROPERTY_SYS_DEBUG_CONFIG;
@@ -50,11 +51,20 @@ void pkt_sys_debug_config(struct hfi_sys_set_property_pkt *pkt, u32 mode,
 
 void pkt_sys_coverage_config(struct hfi_sys_set_property_pkt *pkt, u32 mode)
 {
-	pkt->hdr.size = sizeof(*pkt) + sizeof(u32);
+	pkt->hdr.size = struct_size(pkt, data, 2);
 	pkt->hdr.pkt_type = HFI_CMD_SYS_SET_PROPERTY;
 	pkt->num_properties = 1;
 	pkt->data[0] = HFI_PROPERTY_SYS_CONFIG_COVERAGE;
 	pkt->data[1] = mode;
+}
+
+void pkt_sys_ubwc_config(struct hfi_sys_set_property_pkt *pkt, const struct hfi_ubwc_config *hfi)
+{
+	pkt->hdr.size = struct_size(pkt, data, 1) + sizeof(*hfi);
+	pkt->hdr.pkt_type = HFI_CMD_SYS_SET_PROPERTY;
+	pkt->num_properties = 1;
+	pkt->data[0] = HFI_PROPERTY_SYS_UBWC_CONFIG;
+	memcpy(&pkt->data[1], hfi, sizeof(*hfi));
 }
 
 int pkt_sys_set_resource(struct hfi_sys_set_resource_pkt *pkt, u32 id, u32 size,
@@ -116,7 +126,7 @@ void pkt_sys_power_control(struct hfi_sys_set_property_pkt *pkt, u32 enable)
 {
 	struct hfi_enable *hfi = (struct hfi_enable *)&pkt->data[1];
 
-	pkt->hdr.size = sizeof(*pkt) + sizeof(*hfi) + sizeof(u32);
+	pkt->hdr.size = struct_size(pkt, data, 1) + sizeof(*hfi);
 	pkt->hdr.pkt_type = HFI_CMD_SYS_SET_PROPERTY;
 	pkt->num_properties = 1;
 	pkt->data[0] = HFI_PROPERTY_SYS_CODEC_POWER_PLANE_CTRL;
@@ -1053,6 +1063,8 @@ static int pkt_session_set_property_1x(struct hfi_session_set_property_pkt *pkt,
 		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*info);
 		break;
 	}
+	case HFI_PROPERTY_PARAM_VENC_HDR10_PQ_SEI:
+		return -ENOTSUPP;
 
 	/* FOLLOWING PROPERTIES ARE NOT IMPLEMENTED IN CORE YET */
 	case HFI_PROPERTY_CONFIG_BUFFER_REQUIREMENTS:
@@ -1226,6 +1238,25 @@ pkt_session_set_property_4xx(struct hfi_session_set_property_pkt *pkt,
 		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*hdr10);
 		break;
 	}
+	case HFI_PROPERTY_PARAM_VDEC_CONCEAL_COLOR: {
+		struct hfi_conceal_color_v4 *color = prop_data;
+		u32 *in = pdata;
+
+		color->conceal_color_8bit = *in & 0xff;
+		color->conceal_color_8bit |= ((*in >> 10) & 0xff) << 8;
+		color->conceal_color_8bit |= ((*in >> 20) & 0xff) << 16;
+		color->conceal_color_10bit = *in;
+		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*color);
+		break;
+	}
+
+	case HFI_PROPERTY_PARAM_VENC_H264_TRANSFORM_8X8: {
+		struct hfi_h264_8x8_transform *in = pdata, *tm = prop_data;
+
+		tm->enable_type = in->enable_type;
+		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*tm);
+		break;
+	}
 
 	case HFI_PROPERTY_CONFIG_VENC_MAX_BITRATE:
 	case HFI_PROPERTY_CONFIG_VDEC_POST_LOOP_DEBLOCKER:
@@ -1279,15 +1310,11 @@ pkt_session_set_property_6xx(struct hfi_session_set_property_pkt *pkt,
 		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*cq);
 		break;
 	}
-	case HFI_PROPERTY_PARAM_VDEC_CONCEAL_COLOR: {
-		struct hfi_conceal_color_v4 *color = prop_data;
-		u32 *in = pdata;
+	case HFI_PROPERTY_PARAM_WORK_ROUTE: {
+		struct hfi_video_work_route *in = pdata, *wr = prop_data;
 
-		color->conceal_color_8bit = *in & 0xff;
-		color->conceal_color_8bit |= ((*in >> 10) & 0xff) << 8;
-		color->conceal_color_8bit |= ((*in >> 20) & 0xff) << 16;
-		color->conceal_color_10bit = *in;
-		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*color);
+		wr->video_work_route = in->video_work_route;
+		pkt->shdr.hdr.size += sizeof(u32) + sizeof(*wr);
 		break;
 	}
 	default:

@@ -25,21 +25,21 @@ int efi_set_mapping_permissions(struct mm_struct *mm, efi_memory_desc_t *md);
 ({									\
 	efi_virtmap_load();						\
 	__efi_fpsimd_begin();						\
+	spin_lock(&efi_rt_lock);					\
 })
 
+#undef arch_efi_call_virt
 #define arch_efi_call_virt(p, f, args...)				\
-({									\
-	efi_##f##_t *__f;						\
-	__f = p->f;							\
-	__efi_rt_asm_wrapper(__f, #f, args);				\
-})
+	__efi_rt_asm_wrapper((p)->f, #f, args)
 
 #define arch_efi_call_virt_teardown()					\
 ({									\
+	spin_unlock(&efi_rt_lock);					\
 	__efi_fpsimd_end();						\
 	efi_virtmap_unload();						\
 })
 
+extern spinlock_t efi_rt_lock;
 efi_status_t __efi_rt_asm_wrapper(void *, const char *, ...);
 
 #define ARCH_EFI_IRQ_FLAGS_MASK (PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT)
@@ -82,10 +82,6 @@ static inline unsigned long efi_get_max_initrd_addr(unsigned long image_addr)
 #define alloc_screen_info(x...)		&screen_info
 
 static inline void free_screen_info(struct screen_info *si)
-{
-}
-
-static inline void efifb_setup_from_dmi(struct screen_info *si, const char *opt)
 {
 }
 
@@ -137,7 +133,7 @@ void efi_virtmap_unload(void);
 
 static inline void efi_capsule_flush_cache_range(void *addr, int size)
 {
-	__flush_dcache_area(addr, size);
+	dcache_clean_inval_poc((unsigned long)addr, (unsigned long)addr + size);
 }
 
 #endif /* _ASM_EFI_H */

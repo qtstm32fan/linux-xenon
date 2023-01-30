@@ -40,7 +40,7 @@ after usage with pwm_free().
 
 New users should use the pwm_get() function and pass to it the consumer
 device or a consumer name. pwm_put() is used to free the PWM device. Managed
-variants of these functions, devm_pwm_get() and devm_pwm_put(), also exist.
+variants of the getter, devm_pwm_get() and devm_fwnode_pwm_get(), also exist.
 
 After being requested, a PWM has to be configured using::
 
@@ -48,6 +48,16 @@ After being requested, a PWM has to be configured using::
 
 This API controls both the PWM period/duty_cycle config and the
 enable/disable state.
+
+As a consumer, don't rely on the output's state for a disabled PWM. If it's
+easily possible, drivers are supposed to emit the inactive state, but some
+drivers cannot. If you rely on getting the inactive state, use .duty_cycle=0,
+.enabled=true.
+
+There is also a usage_power setting: If set, the PWM driver is only required to
+maintain the power output but has more freedom regarding signal form.
+If supported by the driver, the signal can be optimized, for example to improve
+EMI by phase shifting the individual channels of a chip.
 
 The pwm_config(), pwm_enable() and pwm_disable() functions are just wrappers
 around pwm_apply_state() and should not be used if the user wants to change

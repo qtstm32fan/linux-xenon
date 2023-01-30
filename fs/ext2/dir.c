@@ -106,12 +106,11 @@ static int ext2_commit_chunk(struct page *page, loff_t pos, unsigned len)
 	return err;
 }
 
-static bool ext2_check_page(struct page *page, int quiet)
+static bool ext2_check_page(struct page *page, int quiet, char *kaddr)
 {
 	struct inode *dir = page->mapping->host;
 	struct super_block *sb = dir->i_sb;
 	unsigned chunk_size = ext2_chunk_size(dir);
-	char *kaddr = page_address(page);
 	u32 max_inumber = le32_to_cpu(EXT2_SB(sb)->s_es->s_inodes_count);
 	unsigned offs, rec_len;
 	unsigned limit = PAGE_SIZE;
@@ -201,18 +200,19 @@ static struct page * ext2_get_page(struct inode *dir, unsigned long n,
 				   int quiet, void **page_addr)
 {
 	struct address_space *mapping = dir->i_mapping;
-	struct page *page = read_mapping_page(mapping, n, NULL);
-	if (!IS_ERR(page)) {
-		*page_addr = kmap_local_page(page);
-		if (unlikely(!PageChecked(page))) {
-			if (PageError(page) || !ext2_check_page(page, quiet))
-				goto fail;
-		}
+	struct folio *folio = read_mapping_folio(mapping, n, NULL);
+
+	if (IS_ERR(folio))
+		return &folio->page;
+	*page_addr = kmap_local_folio(folio, n & (folio_nr_pages(folio) - 1));
+	if (unlikely(!folio_test_checked(folio))) {
+		if (!ext2_check_page(&folio->page, quiet, *page_addr))
+			goto fail;
 	}
-	return page;
+	return &folio->page;
 
 fail:
-	ext2_put_page(page, *page_addr);
+	ext2_put_page(&folio->page, *page_addr);
 	return ERR_PTR(-EIO);
 }
 
@@ -584,10 +584,10 @@ out_unlock:
  * ext2_delete_entry deletes a directory entry by merging it with the
  * previous entry. Page is up-to-date.
  */
-int ext2_delete_entry (struct ext2_dir_entry_2 * dir, struct page * page )
+int ext2_delete_entry (struct ext2_dir_entry_2 *dir, struct page *page,
+			char *kaddr)
 {
 	struct inode *inode = page->mapping->host;
-	char *kaddr = page_address(page);
 	unsigned from = ((char*)dir - kaddr) & ~(ext2_chunk_size(inode)-1);
 	unsigned to = ((char *)dir - kaddr) +
 				ext2_rec_len_from_disk(dir->rec_len);
@@ -607,7 +607,7 @@ int ext2_delete_entry (struct ext2_dir_entry_2 * dir, struct page * page )
 		de = ext2_next_entry(de);
 	}
 	if (pde)
-		from = (char*)pde - (char*)page_address(page);
+		from = (char *)pde - kaddr;
 	pos = page_offset(page) + from;
 	lock_page(page);
 	err = ext2_prepare_chunk(page, pos, to - from);
@@ -672,17 +672,14 @@ int ext2_empty_dir (struct inode * inode)
 	void *page_addr = NULL;
 	struct page *page = NULL;
 	unsigned long i, npages = dir_pages(inode);
-	int dir_has_error = 0;
 
 	for (i = 0; i < npages; i++) {
 		char *kaddr;
 		ext2_dirent * de;
-		page = ext2_get_page(inode, i, dir_has_error, &page_addr);
+		page = ext2_get_page(inode, i, 0, &page_addr);
 
-		if (IS_ERR(page)) {
-			dir_has_error = 1;
-			continue;
-		}
+		if (IS_ERR(page))
+			return 0;
 
 		kaddr = page_addr;
 		de = (ext2_dirent *)kaddr;

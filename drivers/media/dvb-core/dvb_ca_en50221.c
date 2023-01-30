@@ -157,7 +157,7 @@ static void dvb_ca_private_free(struct dvb_ca_private *ca)
 {
 	unsigned int i;
 
-	dvb_free_device(ca->dvbdev);
+	dvb_device_put(ca->dvbdev);
 	for (i = 0; i < ca->slot_count; i++)
 		vfree(ca->slot_info[i].rx_buffer.data);
 
@@ -1386,6 +1386,7 @@ static int dvb_ca_en50221_io_do_ioctl(struct file *file,
 			err = -EINVAL;
 			goto out_unlock;
 		}
+		slot = array_index_nospec(slot, ca->slot_count);
 
 		info->type = CA_CI_LINK;
 		info->flags = 0;

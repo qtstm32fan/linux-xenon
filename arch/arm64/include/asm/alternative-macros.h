@@ -2,12 +2,22 @@
 #ifndef __ASM_ALTERNATIVE_MACROS_H
 #define __ASM_ALTERNATIVE_MACROS_H
 
+#include <linux/const.h>
+#include <vdso/bits.h>
+
 #include <asm/cpucaps.h>
+#include <asm/insn-def.h>
 
-#define ARM64_CB_PATCH ARM64_NCAPS
+/*
+ * Binutils 2.27.0 can't handle a 'UL' suffix on constants, so for the assembly
+ * macros below we must use we must use `(1 << ARM64_CB_SHIFT)`.
+ */
+#define ARM64_CB_SHIFT	15
+#define ARM64_CB_BIT	BIT(ARM64_CB_SHIFT)
 
-/* A64 instructions are always 32 bits. */
-#define	AARCH64_INSN_SIZE		4
+#if ARM64_NCAPS >= ARM64_CB_BIT
+#error "cpucaps have overflown ARM64_CB_BIT"
+#endif
 
 #ifndef __ASSEMBLY__
 
@@ -75,8 +85,8 @@
 #define _ALTERNATIVE_CFG(oldinstr, newinstr, feature, cfg, ...)	\
 	__ALTERNATIVE_CFG(oldinstr, newinstr, feature, IS_ENABLED(cfg))
 
-#define ALTERNATIVE_CB(oldinstr, cb) \
-	__ALTERNATIVE_CFG_CB(oldinstr, ARM64_CB_PATCH, 1, cb)
+#define ALTERNATIVE_CB(oldinstr, feature, cb) \
+	__ALTERNATIVE_CFG_CB(oldinstr, (1 << ARM64_CB_SHIFT) | (feature), 1, cb)
 #else
 
 #include <asm/assembler.h>
@@ -84,7 +94,7 @@
 .macro altinstruction_entry orig_offset alt_offset feature orig_len alt_len
 	.word \orig_offset - .
 	.word \alt_offset - .
-	.hword \feature
+	.hword (\feature)
 	.byte \orig_len
 	.byte \alt_len
 .endm
@@ -143,10 +153,10 @@
 661:
 .endm
 
-.macro alternative_cb cb
+.macro alternative_cb cap, cb
 	.set .Lasm_alt_mode, 0
 	.pushsection .altinstructions, "a"
-	altinstruction_entry 661f, \cb, ARM64_CB_PATCH, 662f-661f, 0
+	altinstruction_entry 661f, \cb, (1 << ARM64_CB_SHIFT) | \cap, 662f-661f, 0
 	.popsection
 661:
 .endm
@@ -197,11 +207,6 @@ alternative_endif
 #define _ALTERNATIVE_CFG(insn1, insn2, cap, cfg, ...)	\
 	alternative_insn insn1, insn2, cap, IS_ENABLED(cfg)
 
-.macro user_alt, label, oldinstr, newinstr, cond
-9999:	alternative_insn "\oldinstr", "\newinstr", \cond
-	_asm_extable 9999b, \label
-.endm
-
 #endif  /*  __ASSEMBLY__  */
 
 /*
@@ -213,5 +218,47 @@ alternative_endif
  */
 #define ALTERNATIVE(oldinstr, newinstr, ...)   \
 	_ALTERNATIVE_CFG(oldinstr, newinstr, __VA_ARGS__, 1)
+
+#ifndef __ASSEMBLY__
+
+#include <linux/types.h>
+
+static __always_inline bool
+alternative_has_feature_likely(unsigned long feature)
+{
+	compiletime_assert(feature < ARM64_NCAPS,
+			   "feature must be < ARM64_NCAPS");
+
+	asm_volatile_goto(
+	ALTERNATIVE_CB("b	%l[l_no]", %[feature], alt_cb_patch_nops)
+	:
+	: [feature] "i" (feature)
+	:
+	: l_no);
+
+	return true;
+l_no:
+	return false;
+}
+
+static __always_inline bool
+alternative_has_feature_unlikely(unsigned long feature)
+{
+	compiletime_assert(feature < ARM64_NCAPS,
+			   "feature must be < ARM64_NCAPS");
+
+	asm_volatile_goto(
+	ALTERNATIVE("nop", "b	%l[l_yes]", %[feature])
+	:
+	: [feature] "i" (feature)
+	:
+	: l_yes);
+
+	return false;
+l_yes:
+	return true;
+}
+
+#endif /* __ASSEMBLY__ */
 
 #endif /* __ASM_ALTERNATIVE_MACROS_H */

@@ -30,7 +30,7 @@ static const struct nla_policy cifs_genl_policy[CIFS_GENL_ATTR_MAX + 1] = {
 	[CIFS_GENL_ATTR_SWN_RESOURCE_NAME]	= { .type = NLA_STRING},
 };
 
-static struct genl_ops cifs_genl_ops[] = {
+static const struct genl_ops cifs_genl_ops[] = {
 	{
 		.cmd = CIFS_GENL_CMD_SWN_NOTIFY,
 		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
@@ -51,6 +51,7 @@ struct genl_family cifs_genl_family = {
 	.policy		= cifs_genl_policy,
 	.ops		= cifs_genl_ops,
 	.n_ops		= ARRAY_SIZE(cifs_genl_ops),
+	.resv_start_op	= CIFS_GENL_CMD_SWN_NOTIFY + 1,
 	.mcgrps		= cifs_genl_mcgrps,
 	.n_mcgrps	= ARRAY_SIZE(cifs_genl_mcgrps),
 };

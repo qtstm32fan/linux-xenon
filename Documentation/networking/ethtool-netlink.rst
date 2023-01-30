@@ -41,6 +41,11 @@ In the message structure descriptions below, if an attribute name is suffixed
 with "+", parent nest can contain multiple attributes of the same type. This
 implements an array of entries.
 
+Attributes that need to be filled-in by device drivers and that are dumped to
+user space based on whether they are valid or not should not use zero as a
+valid value. This avoids the need to explicitly signal the validity of the
+attribute in the device driver API.
+
 
 Request header
 ==============
@@ -179,7 +184,7 @@ according to message purpose:
 
 Userspace to kernel:
 
-  ===================================== ================================
+  ===================================== =================================
   ``ETHTOOL_MSG_STRSET_GET``            get string set
   ``ETHTOOL_MSG_LINKINFO_GET``          get link settings
   ``ETHTOOL_MSG_LINKINFO_SET``          set link settings
@@ -212,7 +217,12 @@ Userspace to kernel:
   ``ETHTOOL_MSG_FEC_SET``               set FEC settings
   ``ETHTOOL_MSG_MODULE_EEPROM_GET``     read SFP module EEPROM
   ``ETHTOOL_MSG_STATS_GET``             get standard statistics
-  ===================================== ================================
+  ``ETHTOOL_MSG_PHC_VCLOCKS_GET``       get PHC virtual clocks info
+  ``ETHTOOL_MSG_MODULE_SET``            set transceiver module parameters
+  ``ETHTOOL_MSG_MODULE_GET``            get transceiver module parameters
+  ``ETHTOOL_MSG_PSE_SET``               set PSE parameters
+  ``ETHTOOL_MSG_PSE_GET``               get PSE parameters
+  ===================================== =================================
 
 Kernel to userspace:
 
@@ -250,6 +260,9 @@ Kernel to userspace:
   ``ETHTOOL_MSG_FEC_NTF``                  FEC settings
   ``ETHTOOL_MSG_MODULE_EEPROM_GET_REPLY``  read SFP module EEPROM
   ``ETHTOOL_MSG_STATS_GET_REPLY``          standard statistics
+  ``ETHTOOL_MSG_PHC_VCLOCKS_GET_REPLY``    PHC virtual clocks info
+  ``ETHTOOL_MSG_MODULE_GET_REPLY``         transceiver module parameters
+  ``ETHTOOL_MSG_PSE_GET_REPLY``            PSE parameters
   ======================================== =================================
 
 ``GET`` requests are sent by userspace applications to retrieve device
@@ -416,6 +429,7 @@ Kernel response contents:
   ``ETHTOOL_A_LINKMODES_DUPLEX``              u8      duplex mode
   ``ETHTOOL_A_LINKMODES_MASTER_SLAVE_CFG``    u8      Master/slave port mode
   ``ETHTOOL_A_LINKMODES_MASTER_SLAVE_STATE``  u8      Master/slave port state
+  ``ETHTOOL_A_LINKMODES_RATE_MATCHING``       u8      PHY rate matching
   ==========================================  ======  ==========================
 
 For ``ETHTOOL_A_LINKMODES_OURS``, value represents advertised modes and mask
@@ -439,6 +453,7 @@ Request contents:
   ``ETHTOOL_A_LINKMODES_SPEED``               u32     link speed (Mb/s)
   ``ETHTOOL_A_LINKMODES_DUPLEX``              u8      duplex mode
   ``ETHTOOL_A_LINKMODES_MASTER_SLAVE_CFG``    u8      Master/slave port mode
+  ``ETHTOOL_A_LINKMODES_RATE_MATCHING``       u8      PHY rate matching
   ``ETHTOOL_A_LINKMODES_LANES``               u32     lanes
   ==========================================  ======  ==========================
 
@@ -518,6 +533,8 @@ Link extended states:
                                                         power required from cable or module
 
   ``ETHTOOL_LINK_EXT_STATE_OVERHEAT``                   The module is overheated
+
+  ``ETHTOOL_LINK_EXT_STATE_MODULE``                     Transceiver module issue
   ================================================      ============================================
 
 Link extended substates:
@@ -593,6 +610,14 @@ Link extended substates:
                                                                        that is not formally
                                                                        supported, which led to
                                                                        signal integrity issues
+
+  ``ETHTOOL_LINK_EXT_SUBSTATE_BSI_SERDES_REFERENCE_CLOCK_LOST``        The external clock signal for
+                                                                       SerDes is too weak or
+                                                                       unavailable.
+
+  ``ETHTOOL_LINK_EXT_SUBSTATE_BSI_SERDES_ALOS``                        The received signal for
+                                                                       SerDes is too weak because
+                                                                       analog loss of signal.
   =================================================================    =============================
 
   Cable issue substates:
@@ -601,6 +626,14 @@ Link extended substates:
   ``ETHTOOL_LINK_EXT_SUBSTATE_CI_UNSUPPORTED_CABLE``    Unsupported cable
 
   ``ETHTOOL_LINK_EXT_SUBSTATE_CI_CABLE_TEST_FAILURE``   Cable test failure
+  ===================================================   ============================================
+
+  Transceiver module issue substates:
+
+  ===================================================   ============================================
+  ``ETHTOOL_LINK_EXT_SUBSTATE_MODULE_CMIS_NOT_READY``   The CMIS Module State Machine did not reach
+                                                        the ModuleReady state. For example, if the
+                                                        module is stuck at ModuleFault state
   ===================================================   ============================================
 
 DEBUG_GET
@@ -821,7 +854,7 @@ Request contents:
 
 Kernel response contents:
 
-  ====================================  ======  ==========================
+  ====================================  ======  ===========================
   ``ETHTOOL_A_RINGS_HEADER``            nested  reply header
   ``ETHTOOL_A_RINGS_RX_MAX``            u32     max size of RX ring
   ``ETHTOOL_A_RINGS_RX_MINI_MAX``       u32     max size of RX mini ring
@@ -831,8 +864,25 @@ Kernel response contents:
   ``ETHTOOL_A_RINGS_RX_MINI``           u32     size of RX mini ring
   ``ETHTOOL_A_RINGS_RX_JUMBO``          u32     size of RX jumbo ring
   ``ETHTOOL_A_RINGS_TX``                u32     size of TX ring
-  ====================================  ======  ==========================
+  ``ETHTOOL_A_RINGS_RX_BUF_LEN``        u32     size of buffers on the ring
+  ``ETHTOOL_A_RINGS_TCP_DATA_SPLIT``    u8      TCP header / data split
+  ``ETHTOOL_A_RINGS_CQE_SIZE``          u32     Size of TX/RX CQE
+  ``ETHTOOL_A_RINGS_TX_PUSH``           u8      flag of TX Push mode
+  ====================================  ======  ===========================
 
+``ETHTOOL_A_RINGS_TCP_DATA_SPLIT`` indicates whether the device is usable with
+page-flipping TCP zero-copy receive (``getsockopt(TCP_ZEROCOPY_RECEIVE)``).
+If enabled the device is configured to place frame headers and data into
+separate buffers. The device configuration must make it possible to receive
+full memory pages of data, for example because MTU is high enough or through
+HW-GRO.
+
+``ETHTOOL_A_RINGS_TX_PUSH`` flag is used to enable descriptor fast
+path to send packets. In ordinary path, driver fills descriptors in DRAM and
+notifies NIC hardware. In fast path, driver pushes descriptors to the device
+through MMIO writes, thus reducing the latency. However, enabling this feature
+may increase the CPU cost. Drivers may enforce additional per-packet
+eligibility checks (e.g. on packet size).
 
 RINGS_SET
 =========
@@ -841,18 +891,30 @@ Sets ring sizes like ``ETHTOOL_SRINGPARAM`` ioctl request.
 
 Request contents:
 
-  ====================================  ======  ==========================
+  ====================================  ======  ===========================
   ``ETHTOOL_A_RINGS_HEADER``            nested  reply header
   ``ETHTOOL_A_RINGS_RX``                u32     size of RX ring
   ``ETHTOOL_A_RINGS_RX_MINI``           u32     size of RX mini ring
   ``ETHTOOL_A_RINGS_RX_JUMBO``          u32     size of RX jumbo ring
   ``ETHTOOL_A_RINGS_TX``                u32     size of TX ring
-  ====================================  ======  ==========================
+  ``ETHTOOL_A_RINGS_RX_BUF_LEN``        u32     size of buffers on the ring
+  ``ETHTOOL_A_RINGS_CQE_SIZE``          u32     Size of TX/RX CQE
+  ``ETHTOOL_A_RINGS_TX_PUSH``           u8      flag of TX Push mode
+  ====================================  ======  ===========================
 
 Kernel checks that requested ring sizes do not exceed limits reported by
 driver. Driver may impose additional constraints and may not suspport all
 attributes.
 
+
+``ETHTOOL_A_RINGS_CQE_SIZE`` specifies the completion queue event size.
+Completion queue events(CQE) are the events posted by NIC to indicate the
+completion status of a packet when the packet is sent(like send success or
+error) or received(like pointers to packet fragments). The CQE size parameter
+enables to modify the CQE size other than default size if NIC supports it.
+A bigger CQE can have more receive buffer pointers inturn NIC can transfer
+a bigger frame from wire. Based on the NIC hardware, the overall completion
+queue size can be adjusted in the driver if CQE size is modified.
 
 CHANNELS_GET
 ============
@@ -937,12 +999,25 @@ Kernel response contents:
   ``ETHTOOL_A_COALESCE_TX_USECS_HIGH``         u32     delay (us), high Tx
   ``ETHTOOL_A_COALESCE_TX_MAX_FRAMES_HIGH``    u32     max packets, high Tx
   ``ETHTOOL_A_COALESCE_RATE_SAMPLE_INTERVAL``  u32     rate sampling interval
+  ``ETHTOOL_A_COALESCE_USE_CQE_TX``            bool    timer reset mode, Tx
+  ``ETHTOOL_A_COALESCE_USE_CQE_RX``            bool    timer reset mode, Rx
   ===========================================  ======  =======================
 
 Attributes are only included in reply if their value is not zero or the
 corresponding bit in ``ethtool_ops::supported_coalesce_params`` is set (i.e.
 they are declared as supported by driver).
 
+Timer reset mode (``ETHTOOL_A_COALESCE_USE_CQE_TX`` and
+``ETHTOOL_A_COALESCE_USE_CQE_RX``) controls the interaction between packet
+arrival and the various time based delay parameters. By default timers are
+expected to limit the max delay between any packet arrival/departure and a
+corresponding interrupt. In this mode timer should be started by packet
+arrival (sometimes delivery of previous interrupt) and reset when interrupt
+is delivered.
+Setting the appropriate attribute to 1 will enable ``CQE`` mode, where
+each packet event resets the timer. In this mode timer is used to force
+the interrupt if queue goes idle, while busy queues depend on the packet
+limit to trigger interrupts.
 
 COALESCE_SET
 ============
@@ -975,6 +1050,8 @@ Request contents:
   ``ETHTOOL_A_COALESCE_TX_USECS_HIGH``         u32     delay (us), high Tx
   ``ETHTOOL_A_COALESCE_TX_MAX_FRAMES_HIGH``    u32     max packets, high Tx
   ``ETHTOOL_A_COALESCE_RATE_SAMPLE_INTERVAL``  u32     rate sampling interval
+  ``ETHTOOL_A_COALESCE_USE_CQE_TX``            bool    timer reset mode, Tx
+  ``ETHTOOL_A_COALESCE_USE_CQE_RX``            bool    timer reset mode, Rx
   ===========================================  ======  =======================
 
 Request is rejected if it attributes declared as unsupported by driver (i.e.
@@ -1363,8 +1440,8 @@ in an implementation specific way.
 ``ETHTOOL_A_FEC_AUTO`` requests the driver to choose FEC mode based on SFP
 module parameters. This does not mean autonegotiation.
 
-MODULE_EEPROM
-=============
+MODULE_EEPROM_GET
+=================
 
 Fetch module EEPROM data dump.
 This interface is designed to allow dumps of at most 1/2 page at once. This
@@ -1383,12 +1460,14 @@ Request contents:
   ``ETHTOOL_A_MODULE_EEPROM_I2C_ADDRESS``  u8      page I2C address
   =======================================  ======  ==========================
 
+If ``ETHTOOL_A_MODULE_EEPROM_BANK`` is not specified, bank 0 is assumed.
+
 Kernel response contents:
 
  +---------------------------------------------+--------+---------------------+
  | ``ETHTOOL_A_MODULE_EEPROM_HEADER``          | nested | reply header        |
  +---------------------------------------------+--------+---------------------+
- | ``ETHTOOL_A_MODULE_EEPROM_DATA``            | nested | array of bytes from |
+ | ``ETHTOOL_A_MODULE_EEPROM_DATA``            | binary | array of bytes from |
  |                                             |        | module EEPROM       |
  +---------------------------------------------+--------+---------------------+
 
@@ -1474,6 +1553,138 @@ Low and high bounds are inclusive, for example:
  etherStatsPkts64Octets          0    64
  etherStatsPkts512to1023Octets 512  1023
  ============================= ==== ====
+
+PHC_VCLOCKS_GET
+===============
+
+Query device PHC virtual clocks information.
+
+Request contents:
+
+  ====================================  ======  ==========================
+  ``ETHTOOL_A_PHC_VCLOCKS_HEADER``      nested  request header
+  ====================================  ======  ==========================
+
+Kernel response contents:
+
+  ====================================  ======  ==========================
+  ``ETHTOOL_A_PHC_VCLOCKS_HEADER``      nested  reply header
+  ``ETHTOOL_A_PHC_VCLOCKS_NUM``         u32     PHC virtual clocks number
+  ``ETHTOOL_A_PHC_VCLOCKS_INDEX``       s32     PHC index array
+  ====================================  ======  ==========================
+
+MODULE_GET
+==========
+
+Gets transceiver module parameters.
+
+Request contents:
+
+  =====================================  ======  ==========================
+  ``ETHTOOL_A_MODULE_HEADER``            nested  request header
+  =====================================  ======  ==========================
+
+Kernel response contents:
+
+  ======================================  ======  ==========================
+  ``ETHTOOL_A_MODULE_HEADER``             nested  reply header
+  ``ETHTOOL_A_MODULE_POWER_MODE_POLICY``  u8      power mode policy
+  ``ETHTOOL_A_MODULE_POWER_MODE``         u8      operational power mode
+  ======================================  ======  ==========================
+
+The optional ``ETHTOOL_A_MODULE_POWER_MODE_POLICY`` attribute encodes the
+transceiver module power mode policy enforced by the host. The default policy
+is driver-dependent, but "auto" is the recommended default and it should be
+implemented by new drivers and drivers where conformance to a legacy behavior
+is not critical.
+
+The optional ``ETHTHOOL_A_MODULE_POWER_MODE`` attribute encodes the operational
+power mode policy of the transceiver module. It is only reported when a module
+is plugged-in. Possible values are:
+
+.. kernel-doc:: include/uapi/linux/ethtool.h
+    :identifiers: ethtool_module_power_mode
+
+MODULE_SET
+==========
+
+Sets transceiver module parameters.
+
+Request contents:
+
+  ======================================  ======  ==========================
+  ``ETHTOOL_A_MODULE_HEADER``             nested  request header
+  ``ETHTOOL_A_MODULE_POWER_MODE_POLICY``  u8      power mode policy
+  ======================================  ======  ==========================
+
+When set, the optional ``ETHTOOL_A_MODULE_POWER_MODE_POLICY`` attribute is used
+to set the transceiver module power policy enforced by the host. Possible
+values are:
+
+.. kernel-doc:: include/uapi/linux/ethtool.h
+    :identifiers: ethtool_module_power_mode_policy
+
+For SFF-8636 modules, low power mode is forced by the host according to table
+6-10 in revision 2.10a of the specification.
+
+For CMIS modules, low power mode is forced by the host according to table 6-12
+in revision 5.0 of the specification.
+
+PSE_GET
+=======
+
+Gets PSE attributes.
+
+Request contents:
+
+  =====================================  ======  ==========================
+  ``ETHTOOL_A_PSE_HEADER``               nested  request header
+  =====================================  ======  ==========================
+
+Kernel response contents:
+
+  ======================================  ======  =============================
+  ``ETHTOOL_A_PSE_HEADER``                nested  reply header
+  ``ETHTOOL_A_PODL_PSE_ADMIN_STATE``         u32  Operational state of the PoDL
+                                                  PSE functions
+  ``ETHTOOL_A_PODL_PSE_PW_D_STATUS``         u32  power detection status of the
+                                                  PoDL PSE.
+  ======================================  ======  =============================
+
+When set, the optional ``ETHTOOL_A_PODL_PSE_ADMIN_STATE`` attribute identifies
+the operational state of the PoDL PSE functions.  The operational state of the
+PSE function can be changed using the ``ETHTOOL_A_PODL_PSE_ADMIN_CONTROL``
+action. This option is corresponding to ``IEEE 802.3-2018`` 30.15.1.1.2
+aPoDLPSEAdminState. Possible values are:
+
+.. kernel-doc:: include/uapi/linux/ethtool.h
+    :identifiers: ethtool_podl_pse_admin_state
+
+When set, the optional ``ETHTOOL_A_PODL_PSE_PW_D_STATUS`` attribute identifies
+the power detection status of the PoDL PSE.  The status depend on internal PSE
+state machine and automatic PD classification support. This option is
+corresponding to ``IEEE 802.3-2018`` 30.15.1.1.3 aPoDLPSEPowerDetectionStatus.
+Possible values are:
+
+.. kernel-doc:: include/uapi/linux/ethtool.h
+    :identifiers: ethtool_podl_pse_pw_d_status
+
+PSE_SET
+=======
+
+Sets PSE parameters.
+
+Request contents:
+
+  ======================================  ======  =============================
+  ``ETHTOOL_A_PSE_HEADER``                nested  request header
+  ``ETHTOOL_A_PODL_PSE_ADMIN_CONTROL``       u32  Control PoDL PSE Admin state
+  ======================================  ======  =============================
+
+When set, the optional ``ETHTOOL_A_PODL_PSE_ADMIN_CONTROL`` attribute is used
+to control PoDL PSE Admin functions. This option is implementing
+``IEEE 802.3-2018`` 30.15.1.2.1 acPoDLPSEAdminControl. See
+``ETHTOOL_A_PODL_PSE_ADMIN_STATE`` for supported values.
 
 Request translation
 ===================
@@ -1573,4 +1784,7 @@ are netlink only.
   n/a                                 ``ETHTOOL_MSG_CABLE_TEST_ACT``
   n/a                                 ``ETHTOOL_MSG_CABLE_TEST_TDR_ACT``
   n/a                                 ``ETHTOOL_MSG_TUNNEL_INFO_GET``
+  n/a                                 ``ETHTOOL_MSG_PHC_VCLOCKS_GET``
+  n/a                                 ``ETHTOOL_MSG_MODULE_GET``
+  n/a                                 ``ETHTOOL_MSG_MODULE_SET``
   =================================== =====================================

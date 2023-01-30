@@ -20,6 +20,7 @@
 #include <linux/threads.h>
 #include <linux/spinlock.h>
 
+#include <asm/asm.h>
 #include <asm/inst.h>
 #include <asm/mipsregs.h>
 
@@ -83,8 +84,6 @@
 
 
 #define KVM_MAX_VCPUS		16
-/* memory slots that does not exposed to userspace */
-#define KVM_PRIVATE_MEM_SLOTS	0
 
 #define KVM_HALT_POLL_NS_DEFAULT 500000
 
@@ -109,10 +108,11 @@ static inline bool kvm_is_error_hva(unsigned long addr)
 }
 
 struct kvm_vm_stat {
-	ulong remote_tlb_flush;
+	struct kvm_vm_stat_generic generic;
 };
 
 struct kvm_vcpu_stat {
+	struct kvm_vcpu_stat_generic generic;
 	u64 wait_exits;
 	u64 cache_exits;
 	u64 signal_exits;
@@ -142,12 +142,6 @@ struct kvm_vcpu_stat {
 #ifdef CONFIG_CPU_LOONGSON64
 	u64 vz_cpucfg_exits;
 #endif
-	u64 halt_successful_poll;
-	u64 halt_attempted_poll;
-	u64 halt_poll_success_ns;
-	u64 halt_poll_fail_ns;
-	u64 halt_poll_invalid;
-	u64 halt_wakeup;
 };
 
 struct kvm_arch_memory_slot {
@@ -384,9 +378,9 @@ static inline void _kvm_atomic_set_c0_guest_reg(unsigned long *reg,
 		__asm__ __volatile__(
 		"	.set	push				\n"
 		"	.set	"MIPS_ISA_ARCH_LEVEL"		\n"
-		"	" __LL "%0, %1				\n"
+		"	"__stringify(LONG_LL)	" %0, %1	\n"
 		"	or	%0, %2				\n"
-		"	" __SC	"%0, %1				\n"
+		"	"__stringify(LONG_SC)	" %0, %1	\n"
 		"	.set	pop				\n"
 		: "=&r" (temp), "+m" (*reg)
 		: "r" (val));
@@ -401,9 +395,9 @@ static inline void _kvm_atomic_clear_c0_guest_reg(unsigned long *reg,
 		__asm__ __volatile__(
 		"	.set	push				\n"
 		"	.set	"MIPS_ISA_ARCH_LEVEL"		\n"
-		"	" __LL "%0, %1				\n"
+		"	"__stringify(LONG_LL)	" %0, %1	\n"
 		"	and	%0, %2				\n"
-		"	" __SC	"%0, %1				\n"
+		"	"__stringify(LONG_SC)	" %0, %1	\n"
 		"	.set	pop				\n"
 		: "=&r" (temp), "+m" (*reg)
 		: "r" (~val));
@@ -419,10 +413,10 @@ static inline void _kvm_atomic_change_c0_guest_reg(unsigned long *reg,
 		__asm__ __volatile__(
 		"	.set	push				\n"
 		"	.set	"MIPS_ISA_ARCH_LEVEL"		\n"
-		"	" __LL "%0, %1				\n"
+		"	"__stringify(LONG_LL)	" %0, %1	\n"
 		"	and	%0, %2				\n"
 		"	or	%0, %3				\n"
-		"	" __SC	"%0, %1				\n"
+		"	"__stringify(LONG_SC)	" %0, %1	\n"
 		"	.set	pop				\n"
 		: "=&r" (temp), "+m" (*reg)
 		: "r" (~change), "r" (val & change));
@@ -902,7 +896,6 @@ static inline void kvm_arch_memslots_updated(struct kvm *kvm, u64 gen) {}
 static inline void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu) {}
 static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
 static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
-static inline void kvm_arch_vcpu_block_finish(struct kvm_vcpu *vcpu) {}
 
 #define __KVM_HAVE_ARCH_FLUSH_REMOTE_TLB
 int kvm_arch_flush_remote_tlb(struct kvm *kvm);

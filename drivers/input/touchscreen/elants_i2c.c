@@ -117,6 +117,19 @@
 #define ELAN_POWERON_DELAY_USEC	500
 #define ELAN_RESET_DELAY_MSEC	20
 
+/* FW boot code version */
+#define BC_VER_H_BYTE_FOR_EKTH3900x1_I2C        0x72
+#define BC_VER_H_BYTE_FOR_EKTH3900x2_I2C        0x82
+#define BC_VER_H_BYTE_FOR_EKTH3900x3_I2C        0x92
+#define BC_VER_H_BYTE_FOR_EKTH5312x1_I2C        0x6D
+#define BC_VER_H_BYTE_FOR_EKTH5312x2_I2C        0x6E
+#define BC_VER_H_BYTE_FOR_EKTH5312cx1_I2C       0x77
+#define BC_VER_H_BYTE_FOR_EKTH5312cx2_I2C       0x78
+#define BC_VER_H_BYTE_FOR_EKTH5312x1_I2C_USB    0x67
+#define BC_VER_H_BYTE_FOR_EKTH5312x2_I2C_USB    0x68
+#define BC_VER_H_BYTE_FOR_EKTH5312cx1_I2C_USB   0x74
+#define BC_VER_H_BYTE_FOR_EKTH5312cx2_I2C_USB   0x75
+
 enum elants_chip_id {
 	EKTH3500,
 	EKTF3624,
@@ -736,6 +749,37 @@ static int elants_i2c_validate_remark_id(struct elants_data *ts,
 	return 0;
 }
 
+static bool elants_i2c_should_check_remark_id(struct elants_data *ts)
+{
+	struct i2c_client *client = ts->client;
+	const u8 bootcode_version = ts->iap_version;
+	bool check;
+
+	/* I2C eKTH3900 and eKTH5312 are NOT support Remark ID */
+	if ((bootcode_version == BC_VER_H_BYTE_FOR_EKTH3900x1_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH3900x2_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH3900x3_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312x1_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312x2_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312cx1_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312cx2_I2C) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312x1_I2C_USB) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312x2_I2C_USB) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312cx1_I2C_USB) ||
+	    (bootcode_version == BC_VER_H_BYTE_FOR_EKTH5312cx2_I2C_USB)) {
+		dev_dbg(&client->dev,
+			"eKTH3900/eKTH5312(0x%02x) are not support remark id\n",
+			bootcode_version);
+		check = false;
+	} else if (bootcode_version >= 0x60) {
+		check = true;
+	} else {
+		check = false;
+	}
+
+	return check;
+}
+
 static int elants_i2c_do_update_firmware(struct i2c_client *client,
 					 const struct firmware *fw,
 					 bool force)
@@ -749,7 +793,7 @@ static int elants_i2c_do_update_firmware(struct i2c_client *client,
 	u16 send_id;
 	int page, n_fw_pages;
 	int error;
-	bool check_remark_id = ts->iap_version >= 0x60;
+	bool check_remark_id = elants_i2c_should_check_remark_id(ts);
 
 	/* Recovery mode detection! */
 	if (force) {
@@ -1285,14 +1329,12 @@ static int elants_i2c_power_on(struct elants_data *ts)
 	if (IS_ERR_OR_NULL(ts->reset_gpio))
 		return 0;
 
-	gpiod_set_value_cansleep(ts->reset_gpio, 1);
-
 	error = regulator_enable(ts->vcc33);
 	if (error) {
 		dev_err(&ts->client->dev,
 			"failed to enable vcc33 regulator: %d\n",
 			error);
-		goto release_reset_gpio;
+		return error;
 	}
 
 	error = regulator_enable(ts->vccio);
@@ -1301,7 +1343,7 @@ static int elants_i2c_power_on(struct elants_data *ts)
 			"failed to enable vccio regulator: %d\n",
 			error);
 		regulator_disable(ts->vcc33);
-		goto release_reset_gpio;
+		return error;
 	}
 
 	/*
@@ -1310,7 +1352,6 @@ static int elants_i2c_power_on(struct elants_data *ts)
 	 */
 	udelay(ELAN_POWERON_DELAY_USEC);
 
-release_reset_gpio:
 	gpiod_set_value_cansleep(ts->reset_gpio, 0);
 	if (error)
 		return error;
@@ -1369,8 +1410,7 @@ static bool elants_acpi_is_hid_device(struct device *dev)
 }
 #endif
 
-static int elants_i2c_probe(struct i2c_client *client,
-			    const struct i2c_device_id *id)
+static int elants_i2c_probe(struct i2c_client *client)
 {
 	union i2c_smbus_data dummy;
 	struct elants_data *ts;
@@ -1396,7 +1436,7 @@ static int elants_i2c_probe(struct i2c_client *client,
 	init_completion(&ts->cmd_done);
 
 	ts->client = client;
-	ts->chip_id = (enum elants_chip_id)id->driver_data;
+	ts->chip_id = (enum elants_chip_id)(uintptr_t)device_get_match_data(&client->dev);
 	i2c_set_clientdata(client, ts);
 
 	ts->vcc33 = devm_regulator_get(&client->dev, "vcc33");
@@ -1419,7 +1459,7 @@ static int elants_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	ts->reset_gpio = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_LOW);
+	ts->reset_gpio = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ts->reset_gpio)) {
 		error = PTR_ERR(ts->reset_gpio);
 
@@ -1440,11 +1480,11 @@ static int elants_i2c_probe(struct i2c_client *client,
 	if (error)
 		return error;
 
-	error = devm_add_action(&client->dev, elants_i2c_power_off, ts);
+	error = devm_add_action_or_reset(&client->dev,
+					 elants_i2c_power_off, ts);
 	if (error) {
 		dev_err(&client->dev,
 			"failed to install power off action: %d\n", error);
-		elants_i2c_power_off(ts);
 		return error;
 	}
 
@@ -1636,15 +1676,15 @@ MODULE_DEVICE_TABLE(acpi, elants_acpi_id);
 
 #ifdef CONFIG_OF
 static const struct of_device_id elants_of_match[] = {
-	{ .compatible = "elan,ekth3500" },
-	{ .compatible = "elan,ektf3624" },
+	{ .compatible = "elan,ekth3500", .data = (void *)EKTH3500 },
+	{ .compatible = "elan,ektf3624", .data = (void *)EKTF3624 },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, elants_of_match);
 #endif
 
 static struct i2c_driver elants_i2c_driver = {
-	.probe = elants_i2c_probe,
+	.probe_new = elants_i2c_probe,
 	.id_table = elants_i2c_id,
 	.driver = {
 		.name = DEVICE_NAME,

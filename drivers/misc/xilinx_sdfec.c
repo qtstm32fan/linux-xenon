@@ -636,7 +636,7 @@ static int xsdfec_table_write(struct xsdfec_dev *xsdfec, u32 offset,
 	}
 
 	for (i = 0; i < nr_pages; i++) {
-		addr = kmap(pages[i]);
+		addr = kmap_local_page(pages[i]);
 		do {
 			xsdfec_regwrite(xsdfec,
 					base_addr + ((offset + reg) *
@@ -645,6 +645,7 @@ static int xsdfec_table_write(struct xsdfec_dev *xsdfec, u32 offset,
 			reg++;
 		} while ((reg < len) &&
 			 ((reg * XSDFEC_REG_WIDTH_JUMP) % PAGE_SIZE));
+		kunmap_local(addr);
 		unpin_user_page(pages[i]);
 	}
 	return 0;
@@ -1012,9 +1013,6 @@ static __poll_t xsdfec_poll(struct file *file, poll_table *wait)
 	struct xsdfec_dev *xsdfec;
 
 	xsdfec = container_of(file->private_data, struct xsdfec_dev, miscdev);
-
-	if (!xsdfec)
-		return EPOLLNVAL | EPOLLHUP;
 
 	poll_wait(file, &xsdfec->waitq, wait);
 

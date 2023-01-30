@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2005, 2006 Nokia Corporation
  * Author:	Samuel Ortiz <samuel.ortiz@nokia.com> and
- *		Juha Yrj�l� <juha.yrjola@nokia.com>
+ *		Juha Yrjola <juha.yrjola@nokia.com>
  */
 
 #include <linux/kernel.h>
@@ -246,9 +246,8 @@ static void omap2_mcspi_set_cs(struct spi_device *spi, bool enable)
 		enable = !enable;
 
 	if (spi->controller_state) {
-		int err = pm_runtime_get_sync(mcspi->dev);
+		int err = pm_runtime_resume_and_get(mcspi->dev);
 		if (err < 0) {
-			pm_runtime_put_noidle(mcspi->dev);
 			dev_err(mcspi->dev, "failed to get sync: %d\n", err);
 			return;
 		}
@@ -758,6 +757,8 @@ omap2_mcspi_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 				dev_vdbg(&spi->dev, "read-%d %02x\n",
 						word_len, *(rx - 1));
 			}
+			/* Add word delay between each word */
+			spi_delay_exec(&xfer->word_delay, xfer);
 		} while (c);
 	} else if (word_len <= 16) {
 		u16		*rx;
@@ -805,6 +806,8 @@ omap2_mcspi_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 				dev_vdbg(&spi->dev, "read-%d %04x\n",
 						word_len, *(rx - 1));
 			}
+			/* Add word delay between each word */
+			spi_delay_exec(&xfer->word_delay, xfer);
 		} while (c >= 2);
 	} else if (word_len <= 32) {
 		u32		*rx;
@@ -852,6 +855,8 @@ omap2_mcspi_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 				dev_vdbg(&spi->dev, "read-%d %08x\n",
 						word_len, *(rx - 1));
 			}
+			/* Add word delay between each word */
+			spi_delay_exec(&xfer->word_delay, xfer);
 		} while (c >= 4);
 	}
 
@@ -1032,41 +1037,6 @@ static void omap2_mcspi_release_dma(struct spi_master *master)
 	}
 }
 
-static int omap2_mcspi_setup(struct spi_device *spi)
-{
-	int			ret;
-	struct omap2_mcspi	*mcspi = spi_master_get_devdata(spi->master);
-	struct omap2_mcspi_regs	*ctx = &mcspi->ctx;
-	struct omap2_mcspi_cs	*cs = spi->controller_state;
-
-	if (!cs) {
-		cs = kzalloc(sizeof *cs, GFP_KERNEL);
-		if (!cs)
-			return -ENOMEM;
-		cs->base = mcspi->base + spi->chip_select * 0x14;
-		cs->phys = mcspi->phys + spi->chip_select * 0x14;
-		cs->mode = 0;
-		cs->chconf0 = 0;
-		cs->chctrl0 = 0;
-		spi->controller_state = cs;
-		/* Link this to context save list */
-		list_add_tail(&cs->node, &ctx->cs);
-	}
-
-	ret = pm_runtime_get_sync(mcspi->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(mcspi->dev);
-
-		return ret;
-	}
-
-	ret = omap2_mcspi_setup_transfer(spi, NULL);
-	pm_runtime_mark_last_busy(mcspi->dev);
-	pm_runtime_put_autosuspend(mcspi->dev);
-
-	return ret;
-}
-
 static void omap2_mcspi_cleanup(struct spi_device *spi)
 {
 	struct omap2_mcspi_cs	*cs;
@@ -1078,6 +1048,47 @@ static void omap2_mcspi_cleanup(struct spi_device *spi)
 
 		kfree(cs);
 	}
+}
+
+static int omap2_mcspi_setup(struct spi_device *spi)
+{
+	bool			initial_setup = false;
+	int			ret;
+	struct omap2_mcspi	*mcspi = spi_master_get_devdata(spi->master);
+	struct omap2_mcspi_regs	*ctx = &mcspi->ctx;
+	struct omap2_mcspi_cs	*cs = spi->controller_state;
+
+	if (!cs) {
+		cs = kzalloc(sizeof(*cs), GFP_KERNEL);
+		if (!cs)
+			return -ENOMEM;
+		cs->base = mcspi->base + spi->chip_select * 0x14;
+		cs->phys = mcspi->phys + spi->chip_select * 0x14;
+		cs->mode = 0;
+		cs->chconf0 = 0;
+		cs->chctrl0 = 0;
+		spi->controller_state = cs;
+		/* Link this to context save list */
+		list_add_tail(&cs->node, &ctx->cs);
+		initial_setup = true;
+	}
+
+	ret = pm_runtime_resume_and_get(mcspi->dev);
+	if (ret < 0) {
+		if (initial_setup)
+			omap2_mcspi_cleanup(spi);
+
+		return ret;
+	}
+
+	ret = omap2_mcspi_setup_transfer(spi, NULL);
+	if (ret && initial_setup)
+		omap2_mcspi_cleanup(spi);
+
+	pm_runtime_mark_last_busy(mcspi->dev);
+	pm_runtime_put_autosuspend(mcspi->dev);
+
+	return ret;
 }
 
 static irqreturn_t omap2_mcspi_irq_handler(int irq, void *data)
@@ -1310,12 +1321,9 @@ static int omap2_mcspi_controller_setup(struct omap2_mcspi *mcspi)
 	struct omap2_mcspi_regs	*ctx = &mcspi->ctx;
 	int			ret = 0;
 
-	ret = pm_runtime_get_sync(mcspi->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(mcspi->dev);
-
+	ret = pm_runtime_resume_and_get(mcspi->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	mcspi_write_reg(master, OMAP2_MCSPI_WAKEUPENABLE,
 			OMAP2_MCSPI_WAKEUPENABLE_WKEN);
@@ -1501,10 +1509,8 @@ static int omap2_mcspi_probe(struct platform_device *pdev)
 	}
 
 	status = platform_get_irq(pdev, 0);
-	if (status == -EPROBE_DEFER)
-		goto free_master;
 	if (status < 0) {
-		dev_err(&pdev->dev, "no irq resource found\n");
+		dev_err_probe(&pdev->dev, status, "no irq resource found\n");
 		goto free_master;
 	}
 	init_completion(&mcspi->txdone);

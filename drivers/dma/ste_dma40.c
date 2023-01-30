@@ -1970,7 +1970,7 @@ static int d40_config_memcpy(struct d40_chan *d40c)
 		   dma_has_cap(DMA_SLAVE, cap)) {
 		d40c->dma_cfg = dma40_memcpy_conf_phy;
 
-		/* Generate interrrupt at end of transfer or relink. */
+		/* Generate interrupt at end of transfer or relink. */
 		d40c->dst_def_cfg |= BIT(D40_SREG_CFG_TIM_POS);
 
 		/* Generate interrupt on error. */
@@ -3674,6 +3674,9 @@ static int __init d40_probe(struct platform_device *pdev)
 			   base->lcla_pool.pages);
 
 	kfree(base->lcla_pool.base_unaligned);
+
+	if (base->lcpa_base)
+		iounmap(base->lcpa_base);
 
 	if (base->phy_lcpa)
 		release_mem_region(base->phy_lcpa,

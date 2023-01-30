@@ -71,14 +71,12 @@ static int keywest_attach_adapter(struct i2c_adapter *adapter)
 	return 0;
 }
 
-static int keywest_remove(struct i2c_client *client)
+static void keywest_remove(struct i2c_client *client)
 {
 	if (! keywest_ctx)
-		return 0;
+		return;
 	if (client == keywest_ctx->client)
 		keywest_ctx->client = NULL;
-
-	return 0;
 }
 
 
@@ -114,7 +112,8 @@ int snd_pmac_tumbler_post_init(void)
 	if (!keywest_ctx || !keywest_ctx->client)
 		return -ENXIO;
 
-	if ((err = keywest_ctx->init_client(keywest_ctx)) < 0) {
+	err = keywest_ctx->init_client(keywest_ctx);
+	if (err < 0) {
 		snd_printk(KERN_ERR "tumbler: %i :cannot initialize the MCS\n", err);
 		return err;
 	}
@@ -136,7 +135,8 @@ int snd_pmac_keywest_init(struct pmac_keywest *i2c)
 
 	keywest_ctx = i2c;
 
-	if ((err = i2c_add_driver(&keywest_driver))) {
+	err = i2c_add_driver(&keywest_driver);
+	if (err) {
 		snd_printk(KERN_ERR "cannot register keywest i2c driver\n");
 		i2c_put_adapter(adap);
 		return err;

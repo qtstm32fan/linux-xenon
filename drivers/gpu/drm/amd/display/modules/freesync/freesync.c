@@ -23,8 +23,6 @@
  *
  */
 
-#include <linux/slab.h>
-
 #include "dm_services.h"
 #include "dc.h"
 #include "mod_freesync.h"
@@ -46,6 +44,10 @@
 /* Number of consecutive frames to check before entering/exiting fixed refresh */
 #define FIXED_REFRESH_ENTER_FRAME_COUNT 5
 #define FIXED_REFRESH_EXIT_FRAME_COUNT 10
+/* Flip interval workaround constants */
+#define VSYNCS_BETWEEN_FLIP_THRESHOLD 2
+#define FREESYNC_CONSEC_FLIP_AFTER_VSYNC 5
+#define FREESYNC_VSYNC_TO_FLIP_DELTA_IN_US 500
 
 struct core_freesync {
 	struct mod_freesync public;
@@ -155,9 +157,18 @@ static unsigned int calc_v_total_from_duration(
 	if (duration_in_us > vrr->max_duration_in_us)
 		duration_in_us = vrr->max_duration_in_us;
 
-	v_total = div64_u64(div64_u64(((unsigned long long)(
-				duration_in_us) * (stream->timing.pix_clk_100hz / 10)),
-				stream->timing.h_total), 1000);
+	if (dc_is_hdmi_signal(stream->signal)) {
+		uint32_t h_total_up_scaled;
+
+		h_total_up_scaled = stream->timing.h_total * 10000;
+		v_total = div_u64((unsigned long long)duration_in_us
+					* stream->timing.pix_clk_100hz + (h_total_up_scaled - 1),
+					h_total_up_scaled);
+	} else {
+		v_total = div64_u64(div64_u64(((unsigned long long)(
+					duration_in_us) * (stream->timing.pix_clk_100hz / 10)),
+					stream->timing.h_total), 1000);
+	}
 
 	/* v_total cannot be less than nominal */
 	if (v_total < stream->timing.v_total) {
@@ -457,6 +468,41 @@ static void apply_fixed_refresh(struct core_freesync *core_freesync,
 	}
 }
 
+static void determine_flip_interval_workaround_req(struct mod_vrr_params *in_vrr,
+		unsigned int curr_time_stamp_in_us)
+{
+	in_vrr->flip_interval.vsync_to_flip_in_us = curr_time_stamp_in_us -
+			in_vrr->flip_interval.v_update_timestamp_in_us;
+
+	/* Determine conditions for stopping workaround */
+	if (in_vrr->flip_interval.flip_interval_workaround_active &&
+			in_vrr->flip_interval.vsyncs_between_flip < VSYNCS_BETWEEN_FLIP_THRESHOLD &&
+			in_vrr->flip_interval.vsync_to_flip_in_us > FREESYNC_VSYNC_TO_FLIP_DELTA_IN_US) {
+		in_vrr->flip_interval.flip_interval_detect_counter = 0;
+		in_vrr->flip_interval.program_flip_interval_workaround = true;
+		in_vrr->flip_interval.flip_interval_workaround_active = false;
+	} else {
+		/* Determine conditions for starting workaround */
+		if (in_vrr->flip_interval.vsyncs_between_flip >= VSYNCS_BETWEEN_FLIP_THRESHOLD &&
+				in_vrr->flip_interval.vsync_to_flip_in_us < FREESYNC_VSYNC_TO_FLIP_DELTA_IN_US) {
+			/* Increase flip interval counter we have 2 vsyncs between flips and
+			 * vsync to flip interval is less than 500us
+			 */
+			in_vrr->flip_interval.flip_interval_detect_counter++;
+			if (in_vrr->flip_interval.flip_interval_detect_counter > FREESYNC_CONSEC_FLIP_AFTER_VSYNC) {
+				/* Start workaround if we detect 5 consecutive instances of the above case */
+				in_vrr->flip_interval.program_flip_interval_workaround = true;
+				in_vrr->flip_interval.flip_interval_workaround_active = true;
+			}
+		} else {
+			/* Reset the flip interval counter if we condition is no longer met */
+			in_vrr->flip_interval.flip_interval_detect_counter = 0;
+		}
+	}
+
+	in_vrr->flip_interval.vsyncs_between_flip = 0;
+}
+
 static bool vrr_settings_require_update(struct core_freesync *core_freesync,
 		struct mod_freesync_config *in_config,
 		unsigned int min_refresh_in_uhz,
@@ -516,7 +562,8 @@ bool mod_freesync_get_v_position(struct mod_freesync *mod_freesync,
 }
 
 static void build_vrr_infopacket_data_v1(const struct mod_vrr_params *vrr,
-		struct dc_info_packet *infopacket)
+		struct dc_info_packet *infopacket,
+		bool freesync_on_desktop)
 {
 	/* PB1 = 0x1A (24bit AMD IEEE OUI (0x00001A) - Byte 0) */
 	infopacket->sb[1] = 0x1A;
@@ -542,10 +589,16 @@ static void build_vrr_infopacket_data_v1(const struct mod_vrr_params *vrr,
 			vrr->state != VRR_STATE_UNSUPPORTED)
 		infopacket->sb[6] |= 0x02;
 
-	/* PB6 = [Bit 2 = FreeSync Active] */
-	if (vrr->state != VRR_STATE_DISABLED &&
+	if (freesync_on_desktop) {
+		/* PB6 = [Bit 2 = FreeSync Active] */
+		if (vrr->state != VRR_STATE_DISABLED &&
 			vrr->state != VRR_STATE_UNSUPPORTED)
-		infopacket->sb[6] |= 0x04;
+			infopacket->sb[6] |= 0x04;
+	} else {
+		if (vrr->state == VRR_STATE_ACTIVE_VARIABLE ||
+			vrr->state == VRR_STATE_ACTIVE_FIXED)
+			infopacket->sb[6] |= 0x04;
+	}
 
 	// For v1 & 2 infoframes program nominal if non-fs mode, otherwise full range
 	/* PB7 = FreeSync Minimum refresh rate (Hz) */
@@ -560,10 +613,6 @@ static void build_vrr_infopacket_data_v1(const struct mod_vrr_params *vrr,
 	 * Note: We should never go above the field rate of the mode timing set.
 	 */
 	infopacket->sb[8] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
-
-	/* FreeSync HDR */
-	infopacket->sb[9] = 0;
-	infopacket->sb[10] = 0;
 }
 
 static void build_vrr_infopacket_data_v3(const struct mod_vrr_params *vrr,
@@ -631,10 +680,6 @@ static void build_vrr_infopacket_data_v3(const struct mod_vrr_params *vrr,
 
 	/* PB16 : Reserved bits 7:1, FixedRate bit 0 */
 	infopacket->sb[16] = (vrr->state == VRR_STATE_ACTIVE_FIXED) ? 1 : 0;
-
-	//FreeSync HDR
-	infopacket->sb[9] = 0;
-	infopacket->sb[10] = 0;
 }
 
 static void build_vrr_infopacket_fs2_data(enum color_transfer_func app_tf,
@@ -719,8 +764,7 @@ static void build_vrr_infopacket_header_v2(enum signal_type signal,
 		/* HB2  = [Bits 7:5 = 0] [Bits 4:0 = Length = 0x09] */
 		infopacket->hb2 = 0x09;
 
-		*payload_size = 0x0A;
-
+		*payload_size = 0x09;
 	} else if (dc_is_dp_signal(signal)) {
 
 		/* HEADER */
@@ -769,9 +813,9 @@ static void build_vrr_infopacket_header_v3(enum signal_type signal,
 		infopacket->hb1 = version;
 
 		/* HB2  = [Bits 7:5 = 0] [Bits 4:0 = Length] */
-		*payload_size = 0x10;
-		infopacket->hb2 = *payload_size - 1; //-1 for checksum
+		infopacket->hb2 = 0x10;
 
+		*payload_size = 0x10;
 	} else if (dc_is_dp_signal(signal)) {
 
 		/* HEADER */
@@ -824,13 +868,14 @@ static void build_vrr_infopacket_checksum(unsigned int *payload_size,
 
 static void build_vrr_infopacket_v1(enum signal_type signal,
 		const struct mod_vrr_params *vrr,
-		struct dc_info_packet *infopacket)
+		struct dc_info_packet *infopacket,
+		bool freesync_on_desktop)
 {
 	/* SPD info packet for FreeSync */
 	unsigned int payload_size = 0;
 
 	build_vrr_infopacket_header_v1(signal, infopacket, &payload_size);
-	build_vrr_infopacket_data_v1(vrr, infopacket);
+	build_vrr_infopacket_data_v1(vrr, infopacket, freesync_on_desktop);
 	build_vrr_infopacket_checksum(&payload_size, infopacket);
 
 	infopacket->valid = true;
@@ -839,12 +884,13 @@ static void build_vrr_infopacket_v1(enum signal_type signal,
 static void build_vrr_infopacket_v2(enum signal_type signal,
 		const struct mod_vrr_params *vrr,
 		enum color_transfer_func app_tf,
-		struct dc_info_packet *infopacket)
+		struct dc_info_packet *infopacket,
+		bool freesync_on_desktop)
 {
 	unsigned int payload_size = 0;
 
 	build_vrr_infopacket_header_v2(signal, infopacket, &payload_size);
-	build_vrr_infopacket_data_v1(vrr, infopacket);
+	build_vrr_infopacket_data_v1(vrr, infopacket, freesync_on_desktop);
 
 	build_vrr_infopacket_fs2_data(app_tf, infopacket);
 
@@ -953,12 +999,12 @@ void mod_freesync_build_vrr_infopacket(struct mod_freesync *mod_freesync,
 #endif
 		break;
 	case PACKET_TYPE_FS_V2:
-		build_vrr_infopacket_v2(stream->signal, vrr, app_tf, infopacket);
+		build_vrr_infopacket_v2(stream->signal, vrr, app_tf, infopacket, stream->freesync_on_desktop);
 		break;
 	case PACKET_TYPE_VRR:
 	case PACKET_TYPE_FS_V1:
 	default:
-		build_vrr_infopacket_v1(stream->signal, vrr, infopacket);
+		build_vrr_infopacket_v1(stream->signal, vrr, infopacket, stream->freesync_on_desktop);
 	}
 
 	if (true == pack_sdp_v1_3 &&
@@ -1161,6 +1207,9 @@ void mod_freesync_handle_preflip(struct mod_freesync *mod_freesync,
 				in_out_vrr);
 		}
 
+		determine_flip_interval_workaround_req(in_out_vrr,
+				curr_time_stamp_in_us);
+
 	}
 }
 
@@ -1169,6 +1218,8 @@ void mod_freesync_handle_v_update(struct mod_freesync *mod_freesync,
 		struct mod_vrr_params *in_out_vrr)
 {
 	struct core_freesync *core_freesync = NULL;
+	unsigned int cur_timestamp_in_us;
+	unsigned long long cur_tick;
 
 	if ((mod_freesync == NULL) || (stream == NULL) || (in_out_vrr == NULL))
 		return;
@@ -1177,6 +1228,36 @@ void mod_freesync_handle_v_update(struct mod_freesync *mod_freesync,
 
 	if (in_out_vrr->supported == false)
 		return;
+
+	cur_tick = dm_get_timestamp(core_freesync->dc->ctx);
+	cur_timestamp_in_us = (unsigned int)
+			div_u64(dm_get_elapse_time_in_ns(core_freesync->dc->ctx, cur_tick, 0), 1000);
+
+	in_out_vrr->flip_interval.vsyncs_between_flip++;
+	in_out_vrr->flip_interval.v_update_timestamp_in_us = cur_timestamp_in_us;
+
+	if (in_out_vrr->state == VRR_STATE_ACTIVE_VARIABLE &&
+			(in_out_vrr->flip_interval.flip_interval_workaround_active ||
+			(!in_out_vrr->flip_interval.flip_interval_workaround_active &&
+			in_out_vrr->flip_interval.program_flip_interval_workaround))) {
+		// set freesync vmin vmax to nominal for workaround
+		in_out_vrr->adjust.v_total_min =
+			mod_freesync_calc_v_total_from_refresh(
+			stream, in_out_vrr->max_refresh_in_uhz);
+		in_out_vrr->adjust.v_total_max =
+				in_out_vrr->adjust.v_total_min;
+		in_out_vrr->flip_interval.program_flip_interval_workaround = false;
+		in_out_vrr->flip_interval.do_flip_interval_workaround_cleanup = true;
+		return;
+	}
+
+	if (in_out_vrr->state != VRR_STATE_ACTIVE_VARIABLE &&
+			in_out_vrr->flip_interval.do_flip_interval_workaround_cleanup) {
+		in_out_vrr->flip_interval.do_flip_interval_workaround_cleanup = false;
+		in_out_vrr->flip_interval.flip_interval_detect_counter = 0;
+		in_out_vrr->flip_interval.vsyncs_between_flip = 0;
+		in_out_vrr->flip_interval.vsync_to_flip_in_us = 0;
+	}
 
 	/* Below the Range Logic */
 
@@ -1282,9 +1363,14 @@ unsigned long long mod_freesync_calc_field_rate_from_timing(
 	return field_rate_in_uhz;
 }
 
+bool mod_freesync_get_freesync_enabled(struct mod_vrr_params *pVrr)
+{
+	return (pVrr->state != VRR_STATE_UNSUPPORTED) && (pVrr->state != VRR_STATE_DISABLED);
+}
+
 bool mod_freesync_is_valid_range(uint32_t min_refresh_cap_in_uhz,
 		uint32_t max_refresh_cap_in_uhz,
-		uint32_t nominal_field_rate_in_uhz) 
+		uint32_t nominal_field_rate_in_uhz)
 {
 
 	/* Typically nominal refresh calculated can have some fractional part.

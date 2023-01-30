@@ -120,7 +120,7 @@ static int ext2_create (struct user_namespace * mnt_userns,
 }
 
 static int ext2_tmpfile(struct user_namespace *mnt_userns, struct inode *dir,
-			struct dentry *dentry, umode_t mode)
+			struct file *file, umode_t mode)
 {
 	struct inode *inode = ext2_new_inode(dir, mode, NULL);
 	if (IS_ERR(inode))
@@ -128,9 +128,9 @@ static int ext2_tmpfile(struct user_namespace *mnt_userns, struct inode *dir,
 
 	ext2_set_file_ops(inode);
 	mark_inode_dirty(inode);
-	d_tmpfile(dentry, inode);
+	d_tmpfile(file, inode);
 	unlock_new_inode(inode);
-	return 0;
+	return finish_open_simple(file, 0);
 }
 
 static int ext2_mknod (struct user_namespace * mnt_userns, struct inode * dir,
@@ -178,10 +178,7 @@ static int ext2_symlink (struct user_namespace * mnt_userns, struct inode * dir,
 		/* slow symlink */
 		inode->i_op = &ext2_symlink_inode_operations;
 		inode_nohighmem(inode);
-		if (test_opt(inode->i_sb, NOBH))
-			inode->i_mapping->a_ops = &ext2_nobh_aops;
-		else
-			inode->i_mapping->a_ops = &ext2_aops;
+		inode->i_mapping->a_ops = &ext2_aops;
 		err = page_symlink(inode, symname, l);
 		if (err)
 			goto out_fail;
@@ -247,10 +244,7 @@ static int ext2_mkdir(struct user_namespace * mnt_userns,
 
 	inode->i_op = &ext2_dir_inode_operations;
 	inode->i_fop = &ext2_dir_operations;
-	if (test_opt(inode->i_sb, NOBH))
-		inode->i_mapping->a_ops = &ext2_nobh_aops;
-	else
-		inode->i_mapping->a_ops = &ext2_aops;
+	inode->i_mapping->a_ops = &ext2_aops;
 
 	inode_inc_link_count(inode);
 
@@ -293,7 +287,7 @@ static int ext2_unlink(struct inode * dir, struct dentry *dentry)
 		goto out;
 	}
 
-	err = ext2_delete_entry (de, page);
+	err = ext2_delete_entry (de, page, page_addr);
 	ext2_put_page(page, page_addr);
 	if (err)
 		goto out;
@@ -397,7 +391,7 @@ static int ext2_rename (struct user_namespace * mnt_userns,
 	old_inode->i_ctime = current_time(old_inode);
 	mark_inode_dirty(old_inode);
 
-	ext2_delete_entry(old_de, old_page);
+	ext2_delete_entry(old_de, old_page, old_page_addr);
 
 	if (dir_de) {
 		if (old_dir != new_dir)

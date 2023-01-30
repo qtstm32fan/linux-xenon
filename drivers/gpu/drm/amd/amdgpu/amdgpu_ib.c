@@ -130,7 +130,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	struct amdgpu_device *adev = ring->adev;
 	struct amdgpu_ib *ib = &ibs[0];
 	struct dma_fence *tmp = NULL;
-	bool skip_preamble, need_ctx_switch;
+	bool need_ctx_switch;
 	unsigned patch_offset = ~0;
 	struct amdgpu_vm *vm;
 	uint64_t fence_ctx;
@@ -155,19 +155,19 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		fence_ctx = 0;
 	}
 
-	if (!ring->sched.ready) {
+	if (!ring->sched.ready && !ring->is_mes_queue) {
 		dev_err(adev->dev, "couldn't schedule ib on ring <%s>\n", ring->name);
 		return -EINVAL;
 	}
 
-	if (vm && !job->vmid) {
+	if (vm && !job->vmid && !ring->is_mes_queue) {
 		dev_err(adev->dev, "VM IB without ID\n");
 		return -EINVAL;
 	}
 
 	if ((ib->flags & AMDGPU_IB_FLAGS_SECURE) &&
-	    (ring->funcs->type == AMDGPU_RING_TYPE_COMPUTE)) {
-		dev_err(adev->dev, "secure submissions not supported on compute rings\n");
+	    (!ring->funcs->secure_submission_supported)) {
+		dev_err(adev->dev, "secure submissions not supported on ring <%s>\n", ring->name);
 		return -EINVAL;
 	}
 
@@ -214,20 +214,11 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	if (job && ring->funcs->init_cond_exec)
 		patch_offset = amdgpu_ring_init_cond_exec(ring);
 
-#ifdef CONFIG_X86_64
-	if (!(adev->flags & AMD_IS_APU))
-#endif
-	{
-		if (ring->funcs->emit_hdp_flush)
-			amdgpu_ring_emit_hdp_flush(ring);
-		else
-			amdgpu_asic_flush_hdp(adev, ring);
-	}
+	amdgpu_device_flush_hdp(adev, ring);
 
 	if (need_ctx_switch)
 		status |= AMDGPU_HAVE_CTX_SWITCH;
 
-	skip_preamble = ring->current_ctx == fence_ctx;
 	if (job && ring->funcs->emit_cntxcntl) {
 		status |= job->preamble_status;
 		status |= job->preemption_status;
@@ -245,14 +236,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	for (i = 0; i < num_ibs; ++i) {
 		ib = &ibs[i];
 
-		/* drop preamble IBs if we don't have a context switch */
-		if ((ib->flags & AMDGPU_IB_FLAG_PREAMBLE) &&
-		    skip_preamble &&
-		    !(status & AMDGPU_PREAMBLE_IB_PRESENT_FIRST) &&
-		    !amdgpu_mcbp &&
-		    !amdgpu_sriov_vf(adev)) /* for SRIOV preemption, Preamble CE ib must be inserted anyway */
-			continue;
-
 		if (job && ring->funcs->emit_frame_cntl) {
 			if (secure != !!(ib->flags & AMDGPU_IB_FLAGS_SECURE)) {
 				amdgpu_ring_emit_frame_cntl(ring, false, secure);
@@ -268,10 +251,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	if (job && ring->funcs->emit_frame_cntl)
 		amdgpu_ring_emit_frame_cntl(ring, false, secure);
 
-#ifdef CONFIG_X86_64
-	if (!(adev->flags & AMD_IS_APU))
-#endif
-		amdgpu_asic_invalidate_hdp(adev, ring);
+	amdgpu_device_invalidate_hdp(adev, ring);
 
 	if (ib->flags & AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE)
 		fence_flags |= AMDGPU_FENCE_FLAG_TC_WB_ONLY;
@@ -282,7 +262,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 				       fence_flags | AMDGPU_FENCE_FLAG_64BIT);
 	}
 
-	r = amdgpu_fence_emit(ring, f, fence_flags);
+	r = amdgpu_fence_emit(ring, f, job, fence_flags);
 	if (r) {
 		dev_err(adev->dev, "failed to emit fence (%d)\n", r);
 		if (job && job->vmid)
@@ -320,20 +300,15 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
  */
 int amdgpu_ib_pool_init(struct amdgpu_device *adev)
 {
-	unsigned size;
 	int r, i;
 
 	if (adev->ib_pool_ready)
 		return 0;
 
 	for (i = 0; i < AMDGPU_IB_POOL_MAX; i++) {
-		if (i == AMDGPU_IB_POOL_DIRECT)
-			size = PAGE_SIZE * 2;
-		else
-			size = AMDGPU_IB_POOL_SIZE;
-
 		r = amdgpu_sa_bo_manager_init(adev, &adev->ib_pools[i],
-					      size, AMDGPU_GPU_PAGE_SIZE,
+					      AMDGPU_IB_POOL_SIZE,
+					      AMDGPU_GPU_PAGE_SIZE,
 					      AMDGPU_GEM_DOMAIN_GTT);
 		if (r)
 			goto error;
@@ -413,6 +388,10 @@ int amdgpu_ib_ring_tests(struct amdgpu_device *adev)
 		 * to them and they have no interrupt support.
 		 */
 		if (!ring->sched.ready || !ring->funcs->test_ib)
+			continue;
+
+		if (adev->enable_mes &&
+		    ring->funcs->type == AMDGPU_RING_TYPE_KIQ)
 			continue;
 
 		/* MM engine need more time */

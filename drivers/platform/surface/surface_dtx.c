@@ -8,7 +8,7 @@
  * acknowledge (to speed things up), abort (e.g. in case the dGPU is still in
  * use), or request detachment via user-space.
  *
- * Copyright (C) 2019-2021 Maximilian Luz <luzmaximilian@gmail.com>
+ * Copyright (C) 2019-2022 Maximilian Luz <luzmaximilian@gmail.com>
  */
 
 #include <linux/fs.h>
@@ -427,6 +427,7 @@ static int surface_dtx_open(struct inode *inode, struct file *file)
 	 */
 	if (test_bit(SDTX_DEVICE_SHUTDOWN_BIT, &ddev->flags)) {
 		up_write(&ddev->client_lock);
+		mutex_destroy(&client->read_lock);
 		sdtx_device_put(client->ddev);
 		kfree(client);
 		return -ENODEV;

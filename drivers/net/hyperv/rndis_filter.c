@@ -20,6 +20,7 @@
 #include <linux/vmalloc.h>
 #include <linux/rtnetlink.h>
 #include <linux/ucs2_string.h>
+#include <linux/string.h>
 
 #include "hyperv_net.h"
 #include "netvsc_trace.h"
@@ -335,9 +336,10 @@ static void rndis_filter_receive_response(struct net_device *ndev,
 		if (resp->msg_len <=
 		    sizeof(struct rndis_message) + RNDIS_EXT_LEN) {
 			memcpy(&request->response_msg, resp, RNDIS_HEADER_SIZE + sizeof(*req_id));
-			memcpy((void *)&request->response_msg + RNDIS_HEADER_SIZE + sizeof(*req_id),
+			unsafe_memcpy((void *)&request->response_msg + RNDIS_HEADER_SIZE + sizeof(*req_id),
 			       data + RNDIS_HEADER_SIZE + sizeof(*req_id),
-			       resp->msg_len - RNDIS_HEADER_SIZE - sizeof(*req_id));
+			       resp->msg_len - RNDIS_HEADER_SIZE - sizeof(*req_id),
+			       "request->response_msg is followed by a padding of RNDIS_EXT_LEN inside rndis_request");
 			if (request->request_msg.ndis_msg_type ==
 			    RNDIS_MSG_QUERY && request->request_msg.msg.
 			    query_req.oid == RNDIS_OID_GEN_MEDIA_CONNECT_STATUS)
@@ -361,6 +363,8 @@ static void rndis_filter_receive_response(struct net_device *ndev,
 			}
 		}
 
+		netvsc_dma_unmap(((struct net_device_context *)
+			netdev_priv(ndev))->device_ctx, &request->pkt);
 		complete(&request->wait_event);
 	} else {
 		netdev_err(ndev,
@@ -1051,10 +1055,8 @@ static int rndis_filter_set_packet_filter(struct rndis_device *dev,
 	set = &request->request_msg.msg.set_req;
 	set->oid = RNDIS_OID_GEN_CURRENT_PACKET_FILTER;
 	set->info_buflen = sizeof(u32);
-	set->info_buf_offset = sizeof(struct rndis_set_request);
-
-	memcpy((void *)(unsigned long)set + sizeof(struct rndis_set_request),
-	       &new_filter, sizeof(u32));
+	set->info_buf_offset = offsetof(typeof(*set), info_buf);
+	memcpy(set->info_buf, &new_filter, sizeof(u32));
 
 	ret = rndis_filter_send_request(dev, request);
 	if (ret == 0) {
@@ -1259,7 +1261,11 @@ static void netvsc_sc_open(struct vmbus_channel *new_sc)
 	/* Set the channel before opening.*/
 	nvchan->channel = new_sc;
 
+	new_sc->next_request_id_callback = vmbus_next_request_id;
+	new_sc->request_addr_callback = vmbus_request_addr;
 	new_sc->rqstor_size = netvsc_rqstor_size(netvsc_ring_bytes);
+	new_sc->max_pkt_size = NETVSC_MAX_PKT_SIZE;
+
 	ret = vmbus_open(new_sc, netvsc_ring_bytes,
 			 netvsc_ring_bytes, NULL, 0,
 			 netvsc_channel_cb, nvchan);
@@ -1345,7 +1351,7 @@ static int rndis_netdev_set_hwcaps(struct rndis_device *rndis_device,
 	struct net_device_context *net_device_ctx = netdev_priv(net);
 	struct ndis_offload hwcaps;
 	struct ndis_offload_params offloads;
-	unsigned int gso_max_size = GSO_MAX_SIZE;
+	unsigned int gso_max_size = GSO_LEGACY_MAX_SIZE;
 	int ret;
 
 	/* Find HW offload capabilities */
@@ -1427,7 +1433,7 @@ static int rndis_netdev_set_hwcaps(struct rndis_device *rndis_device,
 	 */
 	net->features &= ~NETVSC_SUPPORTED_HW_FEATURES | net->hw_features;
 
-	netif_set_gso_max_size(net, gso_max_size);
+	netif_set_tso_max_size(net, gso_max_size);
 
 	ret = rndis_filter_set_offload_params(net, nvdev, &offloads);
 
@@ -1571,7 +1577,7 @@ struct netvsc_device *rndis_filter_device_add(struct hv_device *dev,
 
 	for (i = 1; i < net_device->num_chn; i++)
 		netif_napi_add(net, &net_device->chan_table[i].napi,
-			       netvsc_poll, NAPI_POLL_WEIGHT);
+			       netvsc_poll);
 
 	return net_device;
 

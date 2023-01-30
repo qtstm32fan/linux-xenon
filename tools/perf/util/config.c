@@ -581,7 +581,10 @@ const char *perf_home_perfconfig(void)
 	static const char *config;
 	static bool failed;
 
-	config = failed ? NULL : home_perfconfig();
+	if (failed || config)
+		return config;
+
+	config = home_perfconfig();
 	if (!config)
 		failed = true;
 
@@ -798,7 +801,7 @@ int perf_config_set(struct perf_config_set *set,
 				  section->name, item->name);
 			ret = fn(key, value, data);
 			if (ret < 0) {
-				pr_err("Error: wrong config key-value pair %s=%s\n",
+				pr_err("Error in the given config file: wrong config key-value pair %s=%s\n",
 				       key, value);
 				/*
 				 * Can't be just a 'break', as perf_config_set__for_each_entry()
@@ -904,4 +907,35 @@ void set_buildid_dir(const char *dir)
 	}
 	/* for communicating with external commands */
 	setenv("PERF_BUILDID_DIR", buildid_dir, 1);
+}
+
+struct perf_config_scan_data {
+	const char *name;
+	const char *fmt;
+	va_list args;
+	int ret;
+};
+
+static int perf_config_scan_cb(const char *var, const char *value, void *data)
+{
+	struct perf_config_scan_data *d = data;
+
+	if (!strcmp(var, d->name))
+		d->ret = vsscanf(value, d->fmt, d->args);
+
+	return 0;
+}
+
+int perf_config_scan(const char *name, const char *fmt, ...)
+{
+	struct perf_config_scan_data d = {
+		.name = name,
+		.fmt = fmt,
+	};
+
+	va_start(d.args, fmt);
+	perf_config(perf_config_scan_cb, &d);
+	va_end(d.args);
+
+	return d.ret;
 }

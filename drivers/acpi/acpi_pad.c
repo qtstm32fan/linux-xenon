@@ -17,6 +17,7 @@
 #include <linux/tick.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
+#include <linux/perf_event.h>
 #include <asm/mwait.h>
 #include <xen/xen.h>
 
@@ -164,6 +165,9 @@ static int power_saving_thread(void *data)
 				tsc_marked_unstable = 1;
 			}
 			local_irq_disable();
+
+			perf_lopwr_cb(true);
+
 			tick_broadcast_enable();
 			tick_broadcast_enter();
 			stop_critical_timings();
@@ -172,6 +176,9 @@ static int power_saving_thread(void *data)
 
 			start_critical_timings();
 			tick_broadcast_exit();
+
+			perf_lopwr_cb(false);
+
 			local_irq_enable();
 
 			if (time_before(expire_time, jiffies)) {
@@ -249,12 +256,12 @@ static void set_power_saving_task_num(unsigned int num)
 
 static void acpi_pad_idle_cpus(unsigned int num_cpus)
 {
-	get_online_cpus();
+	cpus_read_lock();
 
 	num_cpus = min_t(unsigned int, num_cpus, num_online_cpus());
 	set_power_saving_task_num(num_cpus);
 
-	put_online_cpus();
+	cpus_read_unlock();
 }
 
 static uint32_t acpi_pad_idle_cpus_num(void)
