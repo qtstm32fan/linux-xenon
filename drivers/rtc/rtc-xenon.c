@@ -68,7 +68,7 @@ static int xenon_set_time(struct device *dev, struct rtc_time *tm)
 {
 	time64_t msec;
 
-	msec = rtc_tm_to_time(tm);
+	msec = rtc_tm_to_time64(tm);
 	if (msec == -1)
 		return msec;
 
