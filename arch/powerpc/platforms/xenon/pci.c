@@ -207,7 +207,7 @@ void __init xenon_pci_init(void)
 	pci_io_base = 0;
 
 	// pcibios_scan_phb(hose, dev);
-	set_pci_dma_ops(&dma_iommu_ops);
+	//set_pci_dma_ops(&dma_iommu_ops);
 }
 
 #else
@@ -271,19 +271,16 @@ void __init xenon_pci_init(void)
 
 	ppc_pci_set_flags(PPC_PCI_CAN_SKIP_ISA_ALIGN);
 
-	root = of_find_node_by_path("/");
+	root = of_root;
 	if (root == NULL) {
 		printk(KERN_CRIT "xenon_pci_init: can't find root "
 		       "of device tree\n");
 		return;
 	}
-	for (np = NULL; (np = of_get_next_child(root, np)) != NULL;) {
-		if (np->name == NULL)
-			continue;
-		if (strcmp(np->name, "pci") == 0) {
-			if (xenon_add_bridge(np) == 0)
-				of_node_get(np);
-		}
+	np = of_find_node_by_name(root, "pci");
+	if (strcmp(np->name, "pci") == 0) {
+		if (xenon_add_bridge(np) == 0)
+			of_node_get(np);
 	}
 	of_node_put(root);
 
