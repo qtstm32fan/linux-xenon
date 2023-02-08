@@ -25,7 +25,6 @@
 #include <asm/machdep.h>
 #include <asm/iommu.h>
 #include <asm/ppc-pci.h>
-#include <linux/dma-map-ops.h>
 
 #ifdef DEBUG
 #define DBG(x...) printk(x)
@@ -207,7 +206,7 @@ void __init xenon_pci_init(void)
 	pci_io_base = 0;
 
 	// pcibios_scan_phb(hose, dev);
-	//set_pci_dma_ops(&dma_iommu_ops);
+	set_pci_dma_ops(&dma_iommu_ops);
 }
 
 #else
@@ -298,7 +297,7 @@ void __init xenon_pci_init(void)
 	/* do we need that? */
 	ppc_md.pci_dma_dev_setup = NULL;
 	ppc_md.pci_dma_bus_setup = NULL;
-	set_pci_dma_ops(&dma_direct_ops);
+	set_pci_dma_ops(&dma_iommu_ops);
 }
 
 #endif
