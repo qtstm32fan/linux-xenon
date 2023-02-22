@@ -52,6 +52,7 @@ void __init udbg_init_ehv_bc(void);
 void __init udbg_init_ps3gelic(void);
 void __init udbg_init_debug_opal_raw(void);
 void __init udbg_init_debug_opal_hvsi(void);
+void __init udbg_init_xenon(void);
 void __init udbg_init_debug_16550(void);
 
 #endif /* __KERNEL__ */
