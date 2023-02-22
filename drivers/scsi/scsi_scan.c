@@ -344,7 +344,6 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
 	sdev->request_queue = q;
 	q->queuedata = sdev;
 	__scsi_init_queue(sdev->host, q);
-	WARN_ON_ONCE(!blk_get_queue(q));
 
 	depth = sdev->host->cmd_per_lun ?: 1;
 
@@ -671,8 +670,7 @@ static int scsi_probe_lun(struct scsi_device *sdev, unsigned char *inq_result,
 		memset(scsi_cmd, 0, 6);
 		scsi_cmd[0] = INQUIRY;
 		scsi_cmd[4] = (unsigned char) try_inquiry_len;
-		scsi_cmd[5] = 0xc0; /* HACK */
-		
+
 		memset(inq_result, 0, try_inquiry_len);
 
 		result = scsi_execute_req(sdev,  scsi_cmd, DMA_FROM_DEVICE,
@@ -1580,7 +1578,8 @@ struct scsi_device *__scsi_add_device(struct Scsi_Host *shost, uint channel,
 		scsi_complete_async_scans();
 
 	if (scsi_host_scan_allowed(shost) && scsi_autopm_get_host(shost) == 0) {
-		scsi_probe_and_add_lun(starget, lun, NULL, &sdev, 1, hostdata);
+		scsi_probe_and_add_lun(starget, lun, NULL, &sdev,
+				       SCSI_SCAN_RESCAN, hostdata);
 		scsi_autopm_put_host(shost);
 	}
 	mutex_unlock(&shost->scan_mutex);
@@ -1919,7 +1918,7 @@ static void do_scsi_scan_host(struct Scsi_Host *shost)
 			msleep(10);
 	} else {
 		scsi_scan_host_selected(shost, SCAN_WILD_CARD, SCAN_WILD_CARD,
-				SCAN_WILD_CARD, 0);
+				SCAN_WILD_CARD, SCSI_SCAN_INITIAL);
 	}
 }
 

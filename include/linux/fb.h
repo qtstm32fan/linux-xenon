@@ -662,6 +662,7 @@ extern int  fb_deferred_io_init(struct fb_info *info);
 extern void fb_deferred_io_open(struct fb_info *info,
 				struct inode *inode,
 				struct file *file);
+extern void fb_deferred_io_release(struct fb_info *info);
 extern void fb_deferred_io_cleanup(struct fb_info *info);
 extern int fb_deferred_io_fsync(struct file *file, loff_t start,
 				loff_t end, int datasync);
@@ -684,18 +685,6 @@ static inline bool fb_be_math(struct fb_info *info)
 #endif /* __BIG_ENDIAN */
 #endif /* CONFIG_FB_FOREIGN_ENDIAN */
 }
-
-static inline int *xenon_convert(struct fb_info *p, int *addr)
-{
-	int index = ((char*)addr) - ((char*)p->screen_base);
-	int y = index / (p->fix.line_length);
-	int x = index % (p->fix.line_length)/4;
-	unsigned int base = ((((y & ~31)*p->var.xres) + (x & ~31)*32 ) +
-	 (((x&3) + ((y&1)<<2) + ((x&28)<<1) + ((y&30)<<5)) ^ ((y&8)<<2))) * 4;
-
-	return (int*)(((char*)p->screen_base)+base);
-}
-
 
 /* drivers/video/fbsysfs.c */
 extern struct fb_info *framebuffer_alloc(size_t size, struct device *dev);
@@ -814,6 +803,15 @@ extern int fb_find_mode(struct fb_var_screeninfo *var,
 			unsigned int dbsize,
 			const struct fb_videomode *default_mode,
 			unsigned int default_bpp);
+
+#if defined(CONFIG_VIDEO_NOMODESET)
+bool fb_modesetting_disabled(const char *drvname);
+#else
+static inline bool fb_modesetting_disabled(const char *drvname)
+{
+	return false;
+}
+#endif
 
 /* Convenience logging macros */
 #define fb_err(fb_info, fmt, ...)					\

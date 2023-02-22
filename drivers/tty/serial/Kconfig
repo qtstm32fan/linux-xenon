@@ -958,6 +958,7 @@ config SERIAL_OMAP_CONSOLE
 config SERIAL_SIFIVE
 	tristate "SiFive UART support"
 	depends on OF
+	default SOC_SIFIVE || SOC_CANAAN
 	select SERIAL_CORE
 	help
 	  Select this option if you are building a kernel for a device that
@@ -967,6 +968,7 @@ config SERIAL_SIFIVE
 config SERIAL_SIFIVE_CONSOLE
 	bool "Console on SiFive UART"
 	depends on SERIAL_SIFIVE=y
+	default SOC_SIFIVE || SOC_CANAAN
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
 	help
@@ -1501,24 +1503,6 @@ config SERIAL_MILBEAUT_USIO_CONSOLE
 	  SoCs as the system console (the system console is the device which
 	  receives all kernel messages and warnings and which allows logins in
 	  single user mode).
-
-config SERIAL_XENON
-	tristate "Xenon XBOX 360 serial port support"
-	select SERIAL_CORE
-	help
-	  If you have an XBOX 360, you can enable its onboard
-	  serial port by enabling this options.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called xenon_uart.
-
-config SERIAL_XENON_CONSOLE
-	bool "Console on XBOX 360 serial port"
-	depends on SERIAL_XENON=y
-	select SERIAL_CORE_CONSOLE
-	help
-	  If you have enabled the serial port on the XBOX 360
-	  you can make it the console by answering Y to this option.
 
 config SERIAL_LITEUART
 	tristate "LiteUART serial port support"

@@ -24,8 +24,6 @@
 #include "cpu_specs_book3s_32.h"
 #endif
 
-#ifdef CONFIG_PPC_XENON
-#include "cpu_specs_xenon.h"
-#elif defined(CONFIG_PPC_BOOK3S_64)
+#ifdef CONFIG_PPC_BOOK3S_64
 #include "cpu_specs_book3s_64.h"
 #endif
